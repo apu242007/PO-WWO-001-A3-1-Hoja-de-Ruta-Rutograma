@@ -1,0 +1,14 @@
+{
+  "name": "Hoja de Ruta / Rutograma — TACKER",
+  "short_name": "Hoja de Ruta",
+  "description": "PO-WWO-001-A3-1 DTM · Relevamiento de hoja de ruta y rutograma",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b3d5c",
+  "theme_color": "#0b3d5c",
+  "icons": [
+    { "src": "tacker-logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "tacker-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
