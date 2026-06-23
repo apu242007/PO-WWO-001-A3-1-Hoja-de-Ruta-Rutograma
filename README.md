@@ -3,6 +3,9 @@
 SPA pública (sin login) para relevar la **hoja de ruta / rutograma** de un traslado y
 enviarla a SharePoint vía Power Automate, con PDF + email de notificación.
 
+🌐 **Live (modo demo hasta cargar el flow):** https://apu242007.github.io/PO-WWO-001-A3-1-Hoja-de-Ruta-Rutograma/
+📦 **Repo:** https://github.com/apu242007/PO-WWO-001-A3-1-Hoja-de-Ruta-Rutograma
+
 Stack: **React 18 + Vite + TypeScript** → **Power Automate HTTP trigger** → **SharePoint Lists**
 + **Outlook V2**. Deploy en **GitHub Pages**. Sigue la skill `spa-sharepoint-power-automate`.
 

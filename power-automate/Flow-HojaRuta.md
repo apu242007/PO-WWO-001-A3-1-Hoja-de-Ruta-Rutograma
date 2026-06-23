@@ -16,7 +16,7 @@ Package (.zip)** and commit it next to this file.
 | `<CHILD_LIST>` | `HojaRutaItems` |
 | `<FOLIO_PREFIX>` | `HR` |
 | `<NOTIFY_EMAIL>` | `jcastro@tackertools.com` |
-| `<TACKER_KEY>` | (opcional) valor de `x-tacker-key` — antibot, NO es secreto |
+| `<TACKER_KEY>` | `hr-8cce77fad3ab004431d6237c` — ya cargado como secret `VITE_TACKER_KEY` en GitHub. Usalo en `Check_key`. Antibot, NO es secreto real. |
 
 ---
 
