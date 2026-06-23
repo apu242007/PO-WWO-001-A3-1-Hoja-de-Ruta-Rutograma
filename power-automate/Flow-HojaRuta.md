@@ -10,7 +10,7 @@ Package (.zip)** and commit it next to this file.
 ## Placeholders
 
 | Token | Value |
-|---|---|
+| --- | --- |
 | `<SITE_URL>` | `https://tackersrl505.sharepoint.com/sites/TODOTACKER480` |
 | `<HEADER_LIST>` | `HojaRutaRutograma` (display Title — confirmá con el script) |
 | `<CHILD_LIST>` | `HojaRutaItems` |
@@ -22,7 +22,7 @@ Package (.zip)** and commit it next to this file.
 
 ## Árbol final
 
-```
+```text
 When a HTTP request is received
 ├─ Check_key                ← opcional, 401 si no matchea
 ├─ Init_varFolio
@@ -38,7 +38,7 @@ When a HTTP request is received
 ## 1) Trigger — *When a HTTP request is received*
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Who can trigger | Anyone |
 | Method (advanced) | `POST` |
 | Request Body JSON Schema | **VACÍO** (dejar en blanco — el SPA es la fuente de verdad) |
@@ -54,7 +54,7 @@ Al guardar aparece la URL → copiala como secret `VITE_POWER_AUTOMATE_URL`.
 ## 3) Init_varFolio — Initialize variable
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Name | `varFolio` |
 | Type | `String` |
 | Value (`fx`) | `if(empty(triggerBody()?['folio']), concat('HR-', formatDateTime(utcNow(),'yyyyMMdd-HHmmss')), triggerBody()?['folio'])` |
@@ -66,7 +66,7 @@ Site `<SITE_URL>` · List `<HEADER_LIST>`. Renombrá la acción a **CreateHeader
 Mapeo de campos (pestaña `fx`, con wrapper defensivo por tipo — skill §9):
 
 | Columna SP (internal) | Tipo | Expresión |
-|---|---|---|
+| --- | --- | --- |
 | Title | Text | `variables('varFolio')` |
 | EquipoSitio | Text | `triggerBody()?['equipoSitio']` |
 | PreparadaPor | Text | `triggerBody()?['preparadaPor']` |
@@ -109,7 +109,7 @@ Mapeo de campos (pestaña `fx`, con wrapper defensivo por tipo — skill §9):
 ## 5) Respuesta — Response (ANTES de los loops)
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Status Code | `200` |
 | Headers | `Content-Type` : `application/json` |
 | Body (`fx`) | `{ "id": @{outputs('CreateHeaderItem')?['body/ID']}, "folio": "@{variables('varFolio')}" }` |
@@ -117,14 +117,14 @@ Mapeo de campos (pestaña `fx`, con wrapper defensivo por tipo — skill §9):
 ## 6) Loop_detalle — Apply to each + Create item (hijo)
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Select an output (`fx`) | `triggerBody()?['detalle']` |
 | Settings ⚙️ Concurrency | ON, Degree = 20 (filas independientes) |
 
 Dentro — **Create item**, List `<CHILD_LIST>`:
 
 | Columna | Expresión |
-|---|---|
+| --- | --- |
 | Title (`fx`) | `items('Loop_detalle')?['item']` |
 | CategoriaItem (`fx`) | `items('Loop_detalle')?['categoria']` |
 | Comentarios (`fx`) | `items('Loop_detalle')?['comentarios']` |
@@ -134,14 +134,14 @@ Dentro — **Create item**, List `<CHILD_LIST>`:
 ## 7) Loop_attachments — Apply to each + Add attachment
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Select an output (`fx`) | `triggerBody()?['attachments']` |
 | Settings ⚙️ Concurrency | **ON, Degree = 1** (mismo item — evita Save Conflict) |
 
 Dentro — **Add attachment**:
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | Site Address | `<SITE_URL>` |
 | List Name | `<HEADER_LIST>` |
 | Id (`fx`) | `outputs('CreateHeaderItem')?['body/ID']` |
@@ -157,17 +157,17 @@ Dentro — **Add attachment**:
 Loop_detalle y Loop_attachments.
 
 | Campo | Valor |
-|---|---|
+| --- | --- |
 | To | `<NOTIFY_EMAIL>` |
 | Subject (`fx`) | `concat('🛣️ Hoja de Ruta ', variables('varFolio'), ' — ', triggerBody()?['origen'], ' a ', triggerBody()?['destino'])` |
 | Body | HTML (ver abajo) |
-| Advanced → Attachments → + Add | |
+| Advanced → Attachments → + Add | (un ítem) |
 | Name (`fx`) | `triggerBody()?['attachments']?[0]?['name']` |
 | Content (`fx`) | `base64ToBinary(triggerBody()?['attachments']?[0]?['contentBase64'])` |
 
 ### Body HTML (pegar en la pestaña code `</>` del editor de correo)
 
-```
+```html
 <div style="font-family:Segoe UI,Arial,sans-serif;color:#14222c">
   <div style="background:#0b3d5c;color:#fff;padding:14px 18px;border-radius:8px 8px 0 0">
     <h2 style="margin:0">Hoja de Ruta / Rutograma</h2>
@@ -214,4 +214,3 @@ Guardar el flow, copiar la URL del trigger (secret `VITE_POWER_AUTOMATE_URL`),
 - [ ] Choices Sí/No: `replace(...,'í','i')` o agregar `Sí` a la columna
 - [ ] Send_email fuera de loops, run-after = solo `is successful`
 - [ ] URL del trigger guardada como secret + `.zip` commiteado
-```
