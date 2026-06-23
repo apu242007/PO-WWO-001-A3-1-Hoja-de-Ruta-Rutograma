@@ -42,6 +42,28 @@ export function displayDateTime(s: string | undefined | null): string {
   });
 }
 
+// --- Dominio / patente AR ---------------------------------------------------
+// Dos formatos: viejo ABC-123 (3 letras + 3 dígitos = 6 chars) y Mercosur
+// AB-123-WE (2 letras + 3 dígitos + 2 letras = 7 chars). El 3er carácter define
+// cuál: letra → viejo, dígito → Mercosur. Auto-formatea progresivamente con "-".
+export function formatDominio(raw: string): string {
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (clean.length === 0) return "";
+  if (clean.length <= 2) return clean;
+  if (/^[A-Z]{3}/.test(clean)) {
+    // viejo: ABC-123
+    if (clean.length <= 3) return clean;
+    return clean.slice(0, 3) + "-" + clean.slice(3, 6);
+  }
+  // Mercosur: AB-123-WE
+  if (clean.length <= 5) return clean.slice(0, 2) + "-" + clean.slice(2);
+  return clean.slice(0, 2) + "-" + clean.slice(2, 5) + "-" + clean.slice(5, 7);
+}
+
+export function isValidDominio(p: string): boolean {
+  return /^[A-Z]{3}-\d{3}$/.test(p) || /^[A-Z]{2}-\d{3}-[A-Z]{2}$/.test(p);
+}
+
 export function displayDate(s: string | undefined | null): string {
   if (!s) return "—";
   // date-only string 'YYYY-MM-DD' — render without tz shift

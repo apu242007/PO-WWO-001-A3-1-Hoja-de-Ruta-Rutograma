@@ -4,6 +4,7 @@
 import {
   CLIENTE_OTRO,
   DESCRIPCION_CARGA_OTRO,
+  UNIDAD_OTRO,
   FOLIO_PREFIX,
   type AttachmentPayload,
   type DetalleRow,
@@ -48,6 +49,12 @@ function clienteFinal(draft: HojaRutaDraft): string | null {
   if (!draft.cliente) return null;
   if (draft.cliente === CLIENTE_OTRO) return draft.clienteOtro?.trim() || "OTRO";
   return draft.cliente;
+}
+
+function unidadFinal(draft: HojaRutaDraft): string | null {
+  if (!draft.unidadRecorrido) return null;
+  if (draft.unidadRecorrido === UNIDAD_OTRO) return draft.unidadOtro?.trim() || "OTRO";
+  return draft.unidadRecorrido;
 }
 
 function num(n: number | undefined): number | null {
@@ -149,7 +156,7 @@ export function buildScalarPayload(draft: HojaRutaDraft, folio: string): Omit<Ho
     realizada: draft.realizada ? new Date(draft.realizada).toISOString() : null,
     preparadaPor: str(draft.preparadaPor),
     dni: num(draft.dni),
-    unidadRecorrido: choice(draft.unidadRecorrido),
+    unidadRecorrido: unidadFinal(draft),
     ubicacion: str(draft.ubicacion),
     cliente: clienteFinal(draft),
     clienteOtro: str(draft.clienteOtro),

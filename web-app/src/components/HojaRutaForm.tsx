@@ -12,7 +12,10 @@ import {
   INTERFERENCIAS_AEREAS_REF,
   SI_NO,
   TIPO_VIA,
-  UNIDADES_RECORRIDO,
+  FLOTA,
+  FLOTA_CATEGORIAS,
+  UNIDAD_OTRO,
+  unidadLabel,
   emptyDraft,
   newCarga,
   newInterferencia,
@@ -30,7 +33,7 @@ import SignaturePad from "./SignaturePad";
 import { clearDraft, loadDraft, saveDraft } from "../lib/draftStorage";
 import { loadPreparadorProfile, savePreparadorProfile } from "../lib/preparadorProfile";
 import { compressImage } from "../lib/imageUtils";
-import { parseDecimal, parseInt0, formatDecimal, formatInt } from "../lib/format";
+import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
 
 // Lazy-loaded: jsPDF + html2canvas + qrcode (~400 KB) only when a PDF is built.
@@ -174,6 +177,8 @@ export default function HojaRutaForm() {
     if (!draft.preparadaPor?.trim()) p.push("Preparada por");
     if (draft.dni == null) p.push("DNI");
     if (!draft.unidadRecorrido) p.push("Unidad utilizada");
+    if (draft.unidadRecorrido === UNIDAD_OTRO && !isValidDominio(draft.unidadOtro ?? ""))
+      p.push("Dominio de la unidad (Otro) — formato válido");
     if (!draft.ubicacion?.trim()) p.push("Ubicación");
     if (!draft.cliente) p.push("Cliente");
     if (draft.cliente === CLIENTE_OTRO && !draft.clienteOtro?.trim())
@@ -356,20 +361,45 @@ export default function HojaRutaForm() {
               placeholder="ej: 29.224.981"
             />
           </label>
-          <label>
+          <label className="span-full">
             Unidad utilizada para recorrido *
             <select
               value={draft.unidadRecorrido ?? ""}
-              onChange={(e) => set("unidadRecorrido", (e.target.value || undefined) as HojaRutaDraft["unidadRecorrido"])}
+              onChange={(e) => set("unidadRecorrido", e.target.value || undefined)}
             >
               <option value="">— Seleccionar —</option>
-              {UNIDADES_RECORRIDO.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
+              {FLOTA_CATEGORIAS.map((cat) => (
+                <optgroup key={cat} label={cat}>
+                  {FLOTA.filter((u) => u.categoria === cat).map((u) => {
+                    const lbl = unidadLabel(u);
+                    return (
+                      <option key={u.interno + u.dominio} value={lbl}>
+                        {lbl}
+                      </option>
+                    );
+                  })}
+                </optgroup>
               ))}
+              <option value={UNIDAD_OTRO}>Otro (ingresar dominio)…</option>
             </select>
           </label>
+          {draft.unidadRecorrido === UNIDAD_OTRO && (
+            <label className={draft.unidadOtro && !isValidDominio(draft.unidadOtro) ? "label-error" : ""}>
+              Dominio de la unidad *
+              <input
+                value={draft.unidadOtro ?? ""}
+                onChange={(e) => set("unidadOtro", formatDominio(e.target.value))}
+                placeholder="ABC-123 ó AB-123-WE"
+                maxLength={9}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+              />
+              {draft.unidadOtro && !isValidDominio(draft.unidadOtro) && (
+                <span className="field-error">Formato inválido. 6 caracteres → ABC-123 · 7 → AB-123-WE.</span>
+              )}
+            </label>
+          )}
           <label>
             Ubicación *
             <input value={draft.ubicacion ?? ""} onChange={(e) => set("ubicacion", e.target.value)} />

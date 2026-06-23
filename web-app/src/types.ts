@@ -6,13 +6,155 @@
 // component state (Files are not serializable, not persisted in the draft).
 // ============================================================================
 
+import { formatDominio } from "./lib/format";
+
 export const FOLIO_PREFIX = "HR"; // HR-YYYYMMDD-NNNN
 
 // ---------------------------------------------------------------------------
 // Choice constants (must stay in sync with SharePoint Choice columns)
 // ---------------------------------------------------------------------------
 
-export const UNIDADES_RECORRIDO = ["#318", "#122", "#321"] as const;
+// Flota TACKER — unidad utilizada para el recorrido. El value guardado es
+// unidadLabel(u). La opción "Otro:" habilita un dominio libre con autoformato.
+export interface FlotaUnidad {
+  interno: string;
+  dominio: string;
+  categoria: string;
+  modelo: string;
+}
+
+export const FLOTA: FlotaUnidad[] = [
+  { interno: "P-171", dominio: "OBL759", categoria: "Semirremolque", modelo: "MIC/SCHS-3 Semirremolque" },
+  { interno: "P-270", dominio: "AD693AZ", categoria: "Semirremolque", modelo: "VULCANO/38-AMCV3II Semirremolque" },
+  { interno: "P-271", dominio: "AD693AV", categoria: "Semirremolque", modelo: "VULCANO/38-AMCV3II Semirremolque" },
+  { interno: "P-272", dominio: "AD693AX", categoria: "Semirremolque", modelo: "VULCANO/38-AMCV3II Semirremolque" },
+  { interno: "P-273", dominio: "AD693AW", categoria: "Semirremolque", modelo: "VULCANO/35-AMP3II Semirremolque" },
+  { interno: "P-001", dominio: "FKY922", categoria: "Semirremolque", modelo: "MIC/SCHS-3 Semirremolque" },
+  { interno: "P-169", dominio: "NWB381", categoria: "Semirremolque", modelo: "MIC/SCHS-3 Semirremolque" },
+  { interno: "P-170", dominio: "NWB382", categoria: "Semirremolque", modelo: "MIC/SCHS-3 Semirremolque" },
+  { interno: "P-172", dominio: "TDK776", categoria: "Semirremolque", modelo: "MALDONADO/SRVC-130 Semirremolque" },
+  { interno: "P-240", dominio: "AD272XM", categoria: "Semirremolque", modelo: "TYCROP/Bombeador Doble" },
+  { interno: "P-298", dominio: "AG112OU", categoria: "Semirremolque", modelo: "SALTO/SRCH2E" },
+  { interno: "P-299", dominio: "AG112OV", categoria: "Semirremolque", modelo: "SALTO/SRCH1E" },
+  { interno: "P-300", dominio: "AG112OY", categoria: "Semirremolque", modelo: "SALTO/SRCH1E" },
+  { interno: "P-323", dominio: "AF220KE", categoria: "Semirremolque", modelo: "QM/Semirremolque 2 ejes c/Cementador Doble" },
+  { interno: "P-305", dominio: "ZZ001GX", categoria: "Carretón 5 ejes", modelo: "PATRONELLI/Carretón 5 ejes" },
+  { interno: "SIN DATO", dominio: "AH505BR", categoria: "Bulk", modelo: "SCHELL/Semirremolque Bulk" },
+  { interno: "P-196", dominio: "AB738BC", categoria: "Tolva", modelo: "FURTAN/Tolva Cemento" },
+  { interno: "P-263", dominio: "AF160LQ", categoria: "Tolva", modelo: "QM/Tolva tipo Bulk" },
+  { interno: "P-102", dominio: "FRP996", categoria: "Grúa", modelo: "PETERBILT/362 c/Grúa" },
+  { interno: "P-144", dominio: "LHY235", categoria: "Camión", modelo: "SCANIA/124C" },
+  { interno: "P-164", dominio: "NJP976", categoria: "Camión", modelo: "IVECO/450E33T" },
+  { interno: "P-193", dominio: "OTU867", categoria: "Camión", modelo: "Ford/CARGO 915E" },
+  { interno: "P-195", dominio: "PKH730", categoria: "Camión", modelo: "IVECO/7400S41TZ" },
+  { interno: "P-257", dominio: "GHI454", categoria: "Camión", modelo: "SCANIA/P380 8X4" },
+  { interno: "P-258", dominio: "AD316UB", categoria: "Camión", modelo: "SCANIA/568-G440 A6X4" },
+  { interno: "P-259", dominio: "AD316UC", categoria: "Camión", modelo: "SCANIA/568-G440 A6X4" },
+  { interno: "P-260", dominio: "AD316UD", categoria: "Camión", modelo: "SCANIA/568-G440 A6X4" },
+  { interno: "P-261", dominio: "AD316UF", categoria: "Camión", modelo: "SCANIA/568-G440 A6X4" },
+  { interno: "P-262", dominio: "AD452UM", categoria: "Camión", modelo: "SCANIA/568-G440 A6X4" },
+  { interno: "P-085", dominio: "FAF435", categoria: "Camión", modelo: "SCANIA/P124CB" },
+  { interno: "P-163", dominio: "NHT653", categoria: "Camión", modelo: "IVECO/450E33T" },
+  { interno: "P-165", dominio: "NKB960", categoria: "Camión", modelo: "Ford/CARGO 1722" },
+  { interno: "P-281", dominio: "AD155RK", categoria: "Camión", modelo: "KENWORTH/CTU" },
+  { interno: "P-050", dominio: "LZA704", categoria: "Todoterreno", modelo: "Audi/Q7 3.0" },
+  { interno: "P-061", dominio: "NBC249", categoria: "Todoterreno", modelo: "Jeep/Wrangler Unlimited Rubicon 3.6" },
+  { interno: "P-062", dominio: "NFY864", categoria: "Todoterreno", modelo: "Mercedes/GLK300 4MATIC" },
+  { interno: "P-060", dominio: "MYW030", categoria: "Pick Up", modelo: "Hyundai/Tucson 2.0 4WD" },
+  { interno: "P-326", dominio: "AI148MB", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-327", dominio: "AI148MC", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-328", dominio: "AI148MD", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-325", dominio: "AI148MA", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-324", dominio: "AI133OZ", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-322", dominio: "AG969TX", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-321", dominio: "AG969TV", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-320", dominio: "AG969TU", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-318", dominio: "AG969TS", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-319", dominio: "AG969TT", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-313", dominio: "AG745ZM", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-314", dominio: "AG745ZF", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-315", dominio: "AG745ZE", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-316", dominio: "AG745XE", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-317", dominio: "AG745XF", categoria: "Pick Up", modelo: "Ford/Ranger DC 4X4 XL 2.2L" },
+  { interno: "P-292", dominio: "AF826NJ", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-293", dominio: "AF826NK", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-294", dominio: "AF826NL", categoria: "Pick Up", modelo: "Ford/Nueva Ranger CD 4X4 XL 2.2L" },
+  { interno: "P-287", dominio: "AF662GF", categoria: "Pick Up", modelo: "VW/Amarok Trend 4x4 2.0L TDI 140CV" },
+  { interno: "P-286", dominio: "AF662GE", categoria: "Pick Up", modelo: "VW/Amarok Trend 4x4 2.0L TDI 140CV" },
+  { interno: "P-288", dominio: "AF662GG", categoria: "Pick Up", modelo: "VW/Amarok Trend 4x4 2.0L TDI 140CV" },
+  { interno: "P-289", dominio: "AF673NB", categoria: "Pick Up", modelo: "VW/Amarok Trend 4x4 2.0L TDI 140CV" },
+  { interno: "P-291", dominio: "AF673NC", categoria: "Pick Up", modelo: "VW/Amarok Trend 4x4 2.0L TDI 140CV" },
+  { interno: "P-296", dominio: "AG152ZH", categoria: "Pick Up", modelo: "VW/Taos" },
+  { interno: "P-290", dominio: "AE924EO", categoria: "Pick Up", modelo: "RAM/1500 Rebel" },
+  { interno: "P-295", dominio: "AF959KV", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI" },
+  { interno: "P-297", dominio: "AG153AT", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-157", dominio: "NGG176", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX PACK 2,5 TDI" },
+  { interno: "P-166", dominio: "NJP988", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX PACK 2,5 TDI" },
+  { interno: "P-167", dominio: "NLI391", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,5 TDI" },
+  { interno: "P-188", dominio: "OPT344", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,5 TDI" },
+  { interno: "P-194", dominio: "PFU160", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,5 TDI" },
+  { interno: "P-189", dominio: "OSY076", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX PACK 2,5 TDI" },
+  { interno: "P-190", dominio: "OSY077", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX PACK 2,5 TDI" },
+  { interno: "P-191", dominio: "OSY078", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX PACK 2,5 TDI" },
+  { interno: "P-251", dominio: "AC130CV", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-252", dominio: "AC130CW", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-253", dominio: "AC130DD", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-197", dominio: "AC130CX", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-198", dominio: "AC130DB", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-199", dominio: "AC130DC", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-255", dominio: "AC486TC", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-254", dominio: "AC225CN", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-264", dominio: "AD642TL", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-265", dominio: "AD642TM", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-266", dominio: "AD642TJ", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-267", dominio: "AD642TK", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-269", dominio: "AD642TI", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-268", dominio: "AD652PF", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-274", dominio: "AD815GD", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-275", dominio: "AD815GE", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-276", dominio: "AD815GF", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-277", dominio: "AD815GG", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-278", dominio: "AD815GH", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-279", dominio: "AD815GI", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S 2,4 TDI 6MT" },
+  { interno: "P-280", dominio: "AF193IP", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-283", dominio: "AF423PT", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-284", dominio: "AF459RD", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-285", dominio: "AF479OA", categoria: "Pick Up", modelo: "Toyota/Hilux 4X2 C/S 2,4 TDI 6MT" },
+  { interno: "P-306", dominio: "AG916YX", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-307", dominio: "AG916YZ", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-308", dominio: "AG950ZA", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-309", dominio: "AG950ZB", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-310", dominio: "AG950ZC", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-329", dominio: "AI283PM", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-330", dominio: "AI283PN", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX 2,4 TDI 6MT" },
+  { interno: "P-331", dominio: "AI283PO", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D 2,4 TDI" },
+  { interno: "P-332", dominio: "AI283PP", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-333", dominio: "AI283PQ", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-334", dominio: "AI283PR", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "P-335", dominio: "AI283PS", categoria: "Pick Up", modelo: "Toyota/Hilux 4X4 C/S DX PACK 2,4 TDI 6MT" },
+  { interno: "A-124", dominio: "AH972IY", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6AT" },
+  { interno: "A-120", dominio: "AG617HU", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D 2,4 TDI" },
+  { interno: "A-122", dominio: "AG801IN", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D 2,4 TDI" },
+  { interno: "A-123", dominio: "AG914PO", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D DX PACK 2,4 TDI 6MT" },
+  { interno: "A-004", dominio: "AG780JC", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D 2,4 TDI" },
+  { interno: "A-121", dominio: "AG667PN", categoria: "Pick Up (Alq. JAM)", modelo: "Toyota/Hilux 4X4 C/D 2,4 TDI" },
+  { interno: "A-099", dominio: "AG046OS", categoria: "Pick Up (Alq. PROFIX)", modelo: "Nissan/Frontier S 4x4 MT CD 2.3D" },
+  { interno: "A-003", dominio: "AG046NV", categoria: "Pick Up (Alq. PROFIX)", modelo: "Nissan/Frontier S 4x4 MT CD 2.3D" },
+  { interno: "A-106", dominio: "AG046OL", categoria: "Pick Up (Alq. PROFIX)", modelo: "Nissan/Frontier S 4x4 MT CD 2.3D" },
+];
+
+/** Etiqueta única para el <option> y para guardar en el campo. */
+export function unidadLabel(u: FlotaUnidad): string {
+  return `${u.interno} · ${formatDominio(u.dominio)} · ${u.modelo}`;
+}
+
+/** Categorías en orden de primera aparición (para <optgroup>). */
+export const FLOTA_CATEGORIAS: string[] = FLOTA.reduce<string[]>((acc, u) => {
+  if (!acc.includes(u.categoria)) acc.push(u.categoria);
+  return acc;
+}, []);
+
+export const UNIDAD_OTRO = "Otro:" as const;
 
 export const CLIENTES = [
   "YPF S.A.",
@@ -164,7 +306,8 @@ export interface HojaRutaDraft {
   realizada?: string; // datetime-local
   preparadaPor?: string;
   dni?: number;
-  unidadRecorrido?: (typeof UNIDADES_RECORRIDO)[number];
+  unidadRecorrido?: string; // unidadLabel(u) de FLOTA, o UNIDAD_OTRO
+  unidadOtro?: string; // dominio libre cuando unidadRecorrido === UNIDAD_OTRO
   ubicacion?: string;
 
   // 2/16 — Cliente

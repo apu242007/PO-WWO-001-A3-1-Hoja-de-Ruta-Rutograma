@@ -8,6 +8,7 @@ import QRCode from "qrcode";
 import {
   DESCRIPCION_CARGA_OTRO,
   CLIENTE_OTRO,
+  UNIDAD_OTRO,
   ALTURA_LIMITE_CARGA,
   type HojaRutaDraft,
   type MediaState,
@@ -192,7 +193,12 @@ export async function buildHojaRutaPdf(input: PdfInput): Promise<Blob> {
     ["Realizada", displayDateTime(draft.realizada)],
     ["Preparada por", draft.preparadaPor ?? ""],
     ["DNI", draft.dni != null ? String(draft.dni) : ""],
-    ["Unidad utilizada", draft.unidadRecorrido ?? ""],
+    [
+      "Unidad utilizada",
+      draft.unidadRecorrido === UNIDAD_OTRO
+        ? draft.unidadOtro || "OTRO"
+        : draft.unidadRecorrido ?? "",
+    ],
     ["Ubicacion", draft.ubicacion ?? ""],
   ]);
 

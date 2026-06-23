@@ -200,8 +200,11 @@ Ensure-DateTime $HeaderTitle "PlanFechaInicio"         "Plan - fecha de inicio (
 Ensure-DateTime $HeaderTitle "FechaFinalizacion"       "Fecha/hora finalizacion (estimada)"     $true
 Ensure-DateTime $HeaderTitle "FirmaFecha"              "Fecha de firma"                         $false
 
+# UnidadRecorrido = Text (flota completa + dominio libre "Otro"; un Choice fijo
+# dropearia los valores no listados — skill §10 FillInChoice)
+Ensure-Field $HeaderTitle "UnidadRecorrido" "Unidad utilizada para recorrido" 2
+
 # Choice (6)
-Ensure-Choice $HeaderTitle "UnidadRecorrido"      "Unidad utilizada para recorrido" @("#318","#122","#321")
 Ensure-Choice $HeaderTitle "TieneGuardaganado1"   "Tiene guardaganado (1ra)"        @("Si","No")
 Ensure-Choice $HeaderTitle "EstadoGuardaganado1"  "Estado guardaganado (1ra)"       @("Buena","Razonable","Deficiente","N/A")
 Ensure-Choice $HeaderTitle "CirculaOtroYac"       "Circula por otro yacimiento"     @("Si","No")

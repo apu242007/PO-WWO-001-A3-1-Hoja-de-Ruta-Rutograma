@@ -95,7 +95,7 @@ Mapeo de campos (pestaña `fx`, con wrapper defensivo por tipo — skill §9):
 | PlanFechaInicio | DateTime | `if(empty(triggerBody()?['planFechaInicio']), null, triggerBody()?['planFechaInicio'])` |
 | FechaFinalizacion | DateTime | `if(empty(triggerBody()?['fechaHoraFinalizacion']), null, triggerBody()?['fechaHoraFinalizacion'])` |
 | FirmaFecha | DateTime | `if(empty(triggerBody()?['firmaFecha']), null, triggerBody()?['firmaFecha'])` |
-| UnidadRecorrido (Value) | Choice | `if(empty(triggerBody()?['unidadRecorrido']), null, triggerBody()?['unidadRecorrido'])` |
+| UnidadRecorrido | Text | `triggerBody()?['unidadRecorrido']` (flota completa + dominio libre; columna Text, no Choice) |
 | TieneGuardaganado1 (Value) | Choice | `if(empty(triggerBody()?['tieneGuardaganado1']), null, replace(triggerBody()?['tieneGuardaganado1'],'í','i'))` |
 | EstadoGuardaganado1 (Value) | Choice | `if(empty(triggerBody()?['estadoGuardaganado1']), null, triggerBody()?['estadoGuardaganado1'])` |
 | CirculaOtroYac (Value) | Choice | `if(empty(triggerBody()?['circulaOtroYacimiento']), null, replace(triggerBody()?['circulaOtroYacimiento'],'í','i'))` |

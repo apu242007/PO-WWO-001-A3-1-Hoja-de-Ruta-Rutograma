@@ -125,6 +125,20 @@ body {
 .grid5 .span2 {
   grid-column: span 2;
 }
+.span-full {
+  grid-column: 1 / -1;
+}
+
+.label-error input,
+.label-error select {
+  border-color: #e0524f;
+  box-shadow: 0 0 0 3px rgba(224, 82, 79, 0.12);
+}
+.field-error {
+  color: var(--err-ink);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
 
 @media (max-width: 680px) {
   .grid2,
