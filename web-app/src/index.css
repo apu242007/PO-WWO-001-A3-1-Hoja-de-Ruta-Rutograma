@@ -207,6 +207,15 @@ body {
   flex: 1;
 }
 
+.mapa-ruta-img {
+  width: 100%;
+  max-width: 620px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: block;
+  margin: 4px auto 0;
+}
+
 @media (max-width: 680px) {
   .grid2,
   .grid3,

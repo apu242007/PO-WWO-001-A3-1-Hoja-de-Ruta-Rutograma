@@ -28,6 +28,7 @@ export interface UploadInput {
   media: MediaState;
   fotosPorTramo: Record<string, File[]>;
   pdfBlob: Blob;
+  mapaRutaUrl?: string | null;
 }
 
 export interface UploadResult {
@@ -237,6 +238,15 @@ async function buildAttachments(input: UploadInput, folio: string): Promise<Atta
       name: `firma_${folio}.png`,
       contentBase64:
         comma >= 0 ? input.draft.firmaResponsable.slice(comma + 1) : input.draft.firmaResponsable,
+    });
+  }
+
+  // mapa de ruta generado
+  if (input.mapaRutaUrl && input.mapaRutaUrl.length > 100) {
+    const comma = input.mapaRutaUrl.indexOf(",");
+    out.push({
+      name: `mapaRuta_${folio}.png`,
+      contentBase64: comma >= 0 ? input.mapaRutaUrl.slice(comma + 1) : input.mapaRutaUrl,
     });
   }
 

@@ -39,6 +39,7 @@ import { loadPreparadorProfile, savePreparadorProfile } from "../lib/preparadorP
 import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
+import { buildRouteMapImage, type MapPoint } from "../lib/routeMap";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
 
 // Lazy-loaded: jsPDF + html2canvas + qrcode (~400 KB) only when a PDF is built.
@@ -196,6 +197,69 @@ export default function HojaRutaForm() {
     }
   }
 
+  // ---- mapa de ruta (virtual) ----
+  const [mapaRutaUrl, setMapaRutaUrl] = useState<string | null>(null);
+  const [mapaBusy, setMapaBusy] = useState(false);
+
+  const routePoints = useMemo((): MapPoint[] => {
+    const pts: MapPoint[] = [];
+    if (hasCoord({ lat: draft.origenLat, lon: draft.origenLon }))
+      pts.push({ lat: draft.origenLat!, lon: draft.origenLon!, label: draft.origen || "Origen", kind: "origen" });
+    draft.baterias.forEach((b) => {
+      if (hasCoord({ lat: b.lat, lon: b.lon })) pts.push({ lat: b.lat!, lon: b.lon!, kind: "bateria" });
+    });
+    if (hasCoord({ lat: draft.tranq1Lat, lon: draft.tranq1Lon }))
+      pts.push({ lat: draft.tranq1Lat!, lon: draft.tranq1Lon!, kind: "gate" });
+    draft.tranqueras.forEach((t) => {
+      if (hasCoord({ lat: t.lat, lon: t.lon })) pts.push({ lat: t.lat!, lon: t.lon!, kind: "gate" });
+    });
+    if (hasCoord({ lat: draft.destinoLat, lon: draft.destinoLon }))
+      pts.push({ lat: draft.destinoLat!, lon: draft.destinoLon!, label: draft.destino || "Destino", kind: "destino" });
+    return pts;
+  }, [
+    draft.origenLat,
+    draft.origenLon,
+    draft.destinoLat,
+    draft.destinoLon,
+    draft.tranq1Lat,
+    draft.tranq1Lon,
+    draft.origen,
+    draft.destino,
+    draft.baterias,
+    draft.tranqueras,
+  ]);
+
+  const puedeMapa = routePoints.length >= 2;
+
+  async function generarMapa() {
+    if (!puedeMapa) return;
+    setMapaBusy(true);
+    setError(null);
+    try {
+      const url = await buildRouteMapImage(routePoints);
+      setMapaRutaUrl(url);
+      if (!url) setError("No se pudo generar el mapa.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo generar el mapa.");
+    } finally {
+      setMapaBusy(false);
+    }
+  }
+
+  // auto-genera cuando hay origen+destino con coords (con debounce)
+  const routeSig = routePoints.map((p) => `${p.lat},${p.lon}`).join("|");
+  useEffect(() => {
+    if (routePoints.length < 2) {
+      setMapaRutaUrl(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      buildRouteMapImage(routePoints).then((url) => url && setMapaRutaUrl(url)).catch(() => {});
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeSig]);
+
   // ---- repeat-row helpers ----
   function patchBateria(id: string, patch: Partial<Bateria>) {
     setDraft((d) => ({ ...d, baterias: d.baterias.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
@@ -313,8 +377,8 @@ export default function HojaRutaForm() {
       const folio = draft.folio?.trim() || genFolio();
       if (!draft.folio) set("folio", folio);
       const buildHojaRutaPdf = await loadPdf();
-      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio });
-      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob });
+      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
+      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob, mapaRutaUrl });
       if (!res.ok) {
         setError(res.error ?? "Error al enviar. Reintentá.");
         return;
@@ -352,7 +416,7 @@ export default function HojaRutaForm() {
     try {
       const folio = draft.folio?.trim() || genFolio();
       const buildHojaRutaPdf = await loadPdf();
-      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio });
+      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -825,6 +889,27 @@ export default function HojaRutaForm() {
           preview={mediaPreviews.mapaRecorrido}
           onSet={setMediaFile}
         />
+      </section>
+
+      {/* MAPA DE RUTA (generado) */}
+      <section className="card">
+        <h2>Mapa de ruta (generado)</h2>
+        <p className="hint">
+          Mapa virtual con origen, destino, tranqueras y baterías + la ruta. Se genera solo cuando hay
+          coordenadas; usa OpenStreetMap (o esquema si no hay conexión). Se adjunta al envío y al PDF.
+        </p>
+        {!puedeMapa && (
+          <p className="hint">
+            Cargá coordenadas de <strong>origen</strong> y <strong>destino</strong> (sección 3) para
+            generar el mapa.
+          </p>
+        )}
+        {mapaRutaUrl && <img src={mapaRutaUrl} alt="Mapa de ruta" className="mapa-ruta-img" />}
+        <div className="actions" style={{ marginTop: 10 }}>
+          <button type="button" className="btn-ghost" onClick={generarMapa} disabled={!puedeMapa || mapaBusy}>
+            {mapaBusy ? "Generando mapa…" : mapaRutaUrl ? "Regenerar mapa" : "Generar mapa"}
+          </button>
+        </div>
       </section>
 
       {/* TRAMOS */}

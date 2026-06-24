@@ -25,6 +25,7 @@ export interface PdfInput {
   media: MediaState;
   fotosPorTramo: Record<string, File[]>;
   folio: string;
+  mapaRutaUrl?: string | null;
 }
 
 /** ASCII transliteration so jsPDF's built-in font never garbles accents. */
@@ -73,7 +74,7 @@ function addImageSafe(doc: jsPDF, dataUrl: string, x: number, y: number, w: numb
 }
 
 export async function buildHojaRutaPdf(input: PdfInput): Promise<Blob> {
-  const { draft, media, fotosPorTramo, folio } = input;
+  const { draft, media, fotosPorTramo, folio, mapaRutaUrl } = input;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -298,6 +299,18 @@ export async function buildHojaRutaPdf(input: PdfInput): Promise<Blob> {
       body: body.map((r) => r.map(safe)),
     });
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+  }
+
+  // ---- Mapa de ruta (generado) ----
+  if (mapaRutaUrl && mapaRutaUrl.length > 100) {
+    sectionTitle("MAPA DE RUTA");
+    const imgW = pageW - margin * 2;
+    const imgH = imgW * (420 / 620);
+    ensure(imgH + 2);
+    addImageSafe(doc, mapaRutaUrl, margin, y, imgW, imgH);
+    doc.setDrawColor("#cccccc");
+    doc.rect(margin, y, imgW, imgH);
+    y += imgH + 4;
   }
 
   // ---- Tramos ----
