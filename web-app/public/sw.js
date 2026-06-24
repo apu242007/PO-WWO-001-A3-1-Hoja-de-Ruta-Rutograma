@@ -1,5 +1,5 @@
 // Service worker — bump CACHE on every change to force update (skill §7).
-const CACHE = "hojaruta-v1";
+const CACHE = "hojaruta-v2";
 const PRECACHE = ["./", "./index.html", "./tacker-logo.png", "./manifest.json"];
 
 self.addEventListener("install", (e) => {
