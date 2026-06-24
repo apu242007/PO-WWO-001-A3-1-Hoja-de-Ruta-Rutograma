@@ -258,10 +258,25 @@ export const ALTURA_LIMITE_CARGA = 4.4; // mts — gatilla instructivo de carga 
 
 export interface Tranquera {
   id: string;
-  /** Distancia a la próxima tranquera (kms) */
+  /** Distancia a la próxima tranquera (kms) — auto desde coords o manual */
   distanciaKm?: number;
+  lat?: number;
+  lon?: number;
   tieneGuardaganado?: (typeof SI_NO)[number];
   estadoGuardaganado?: (typeof ESTADO_GUARDAGANADO)[number];
+}
+
+export interface Bateria {
+  id: string;
+  /** Paso por Batería Nº (N/A si no corresponde) */
+  numero?: string;
+  lat?: number;
+  lon?: number;
+}
+
+export interface NombreItem {
+  id: string;
+  nombre?: string;
 }
 
 export interface Tramo {
@@ -316,17 +331,22 @@ export interface HojaRutaDraft {
 
   // 3/16 — Encabezado del rutograma
   origen?: string;
+  origenLat?: number;
+  origenLon?: number;
   destino?: string;
-  distanciaTotalKm?: string; // Text answer (admite "aprox")
+  destinoLat?: number;
+  destinoLon?: number;
+  distanciaTotalKm?: string; // Text answer (auto desde coords, editable)
   fechaHoraInicioProgramada?: string; // datetime-local
   inspectorResponsable?: string;
-  pasoBateria1?: string; // "N/A" si no corresponde
 
-  // 4/16 — Segundo paso por batería y altura
-  pasoBateria2?: string;
+  // 4/16 — Pasos por batería (repeat) + altura
+  baterias: Bateria[];
   alturaMaximaCarga?: number; // mts
 
-  // 5/16 + 6/16 — Información del recorrido (primera tranquera)
+  // 5/16 + 6/16 — Información del recorrido (primera tranquera, con coords)
+  tranq1Lat?: number;
+  tranq1Lon?: number;
   distancia1erTranqueraKm?: number;
   tieneGuardaganado1?: (typeof SI_NO)[number];
   estadoGuardaganado1?: (typeof ESTADO_GUARDAGANADO)[number];
@@ -340,11 +360,9 @@ export interface HojaRutaDraft {
   // 9–10/16 — Interferencias aéreas (repeat); la 1ª es interferencias[0]
   interferencias: Interferencia[];
 
-  // 10/16 — Otros yacimientos / rutas
-  circulaOtroYacimiento?: (typeof SI_NO)[number];
-  yacimientoCircula?: string;
-  circulaRutasEstatales?: (typeof SI_NO)[number];
-  rutasCircula?: string;
+  // 10/16 — Otros yacimientos / rutas (repeat)
+  yacimientos: NombreItem[];
+  rutas: NombreItem[];
 
   // 11/16 — Plan de desmontaje, transporte y montaje
   planFechaInicio?: string; // date
@@ -365,10 +383,13 @@ export interface HojaRutaDraft {
 
 export function emptyDraft(): HojaRutaDraft {
   return {
+    baterias: [newBateria()],
     tranqueras: [],
     tramos: [newTramo(1)],
     interferencias: [newInterferencia()],
     cargas: [newCarga(1)],
+    yacimientos: [],
+    rutas: [],
   };
 }
 
@@ -395,6 +416,12 @@ export function newInterferencia(): Interferencia {
 }
 export function newCarga(item?: number): Carga {
   return { id: newId(), item };
+}
+export function newBateria(): Bateria {
+  return { id: newId() };
+}
+export function newNombre(): NombreItem {
+  return { id: newId() };
 }
 
 // ---------------------------------------------------------------------------

@@ -96,15 +96,16 @@ Mapeo de campos (pestaña `fx`, con wrapper defensivo por tipo — skill §9):
 | FechaFinalizacion | DateTime | `if(empty(triggerBody()?['fechaHoraFinalizacion']), null, triggerBody()?['fechaHoraFinalizacion'])` |
 | FirmaFecha | DateTime | `if(empty(triggerBody()?['firmaFecha']), null, triggerBody()?['firmaFecha'])` |
 | UnidadRecorrido | Text | `triggerBody()?['unidadRecorrido']` (flota completa + dominio libre; columna Text, no Choice) |
-| TieneGuardaganado1 (Value) | Choice | `if(empty(triggerBody()?['tieneGuardaganado1']), null, replace(triggerBody()?['tieneGuardaganado1'],'í','i'))` |
+| TieneGuardaganado1 (Value) | Choice | `if(empty(triggerBody()?['tieneGuardaganado1']), null, if(startsWith(triggerBody()?['tieneGuardaganado1'],'S'),'Si','No'))` |
 | EstadoGuardaganado1 (Value) | Choice | `if(empty(triggerBody()?['estadoGuardaganado1']), null, triggerBody()?['estadoGuardaganado1'])` |
-| CirculaOtroYac (Value) | Choice | `if(empty(triggerBody()?['circulaOtroYacimiento']), null, replace(triggerBody()?['circulaOtroYacimiento'],'í','i'))` |
-| CirculaRutas (Value) | Choice | `if(empty(triggerBody()?['circulaRutasEstatales']), null, replace(triggerBody()?['circulaRutasEstatales'],'í','i'))` |
+| CirculaOtroYac (Value) | Choice | `if(empty(triggerBody()?['circulaOtroYacimiento']), null, if(startsWith(triggerBody()?['circulaOtroYacimiento'],'S'),'Si','No'))` |
+| CirculaRutas (Value) | Choice | `if(empty(triggerBody()?['circulaRutasEstatales']), null, if(startsWith(triggerBody()?['circulaRutasEstatales'],'S'),'Si','No'))` |
 | Declaracion | Yes/No | `if(equals(triggerBody()?['declaracion'], null), false, bool(triggerBody()?['declaracion']))` |
 
 > **Nota choices "Sí/No":** el SPA manda `"Sí"` (con tilde). Las choices del script se crearon
-> como `Si`/`No` (sin tilde, ASCII-safe). El `replace(...,'í','i')` normaliza. Si preferís dejar
-> la tilde, agregá `Sí` como choice válida en la columna y borrá el `replace`.
+> como `Si`/`No` (sin tilde, ASCII-safe). Se normaliza con
+> `if(startsWith(...,'S'),'Si','No')` — sin literales acentuados (un `replace(...,'í','i')` con
+> `í` en el editor es-ES da "expresión no válida"). Alternativa: agregar `Sí` como choice válida.
 
 ## 5) Respuesta — Response (ANTES de los loops)
 

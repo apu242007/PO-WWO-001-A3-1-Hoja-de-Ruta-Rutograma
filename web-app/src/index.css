@@ -140,6 +140,73 @@ body {
   font-weight: 600;
 }
 
+.hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.punto-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coord-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.coord-in {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  padding: 7px 8px;
+}
+.btn-gps {
+  flex: 0 0 auto;
+  background: var(--navy);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 0 12px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-gps:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.auto-tag {
+  display: inline-block;
+  background: #e1f0e6;
+  color: var(--ok);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.lista-block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fbfdfe;
+}
+.inline-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.inline-row input {
+  flex: 1;
+}
+
 @media (max-width: 680px) {
   .grid2,
   .grid3,

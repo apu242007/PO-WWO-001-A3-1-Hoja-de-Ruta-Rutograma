@@ -5,10 +5,12 @@
 import type { HojaRutaDraft } from "../types";
 import { emptyDraft } from "../types";
 
-const STORAGE_KEY = "tacker-hojaruta-draft-v1";
-const STORAGE_TS_KEY = "tacker-hojaruta-draft-ts-v1";
+const STORAGE_KEY = "tacker-hojaruta-draft-v2";
+const STORAGE_TS_KEY = "tacker-hojaruta-draft-ts-v2";
 const LEGACY_KEYS: string[] = [
-  // bump versions on breaking shape changes and list old keys here
+  // v1: antes de baterías/coords/yacimientos-rutas como listas
+  "tacker-hojaruta-draft-v1",
+  "tacker-hojaruta-draft-ts-v1",
 ];
 
 function purgeLegacy(): void {
@@ -33,6 +35,10 @@ export function loadDraft(): HojaRutaDraft {
       ...parsed,
       // never persist the signature dataURL — force re-sign each session
       firmaResponsable: undefined,
+      baterias:
+        Array.isArray(parsed.baterias) && parsed.baterias.length > 0 ? parsed.baterias : base.baterias,
+      yacimientos: Array.isArray(parsed.yacimientos) ? parsed.yacimientos : base.yacimientos,
+      rutas: Array.isArray(parsed.rutas) ? parsed.rutas : base.rutas,
       tranqueras: Array.isArray(parsed.tranqueras) ? parsed.tranqueras : base.tranqueras,
       tramos:
         Array.isArray(parsed.tramos) && parsed.tramos.length > 0 ? parsed.tramos : base.tramos,

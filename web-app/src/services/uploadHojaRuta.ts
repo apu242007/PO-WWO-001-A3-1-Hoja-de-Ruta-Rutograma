@@ -11,6 +11,7 @@ import {
   type HojaRutaDraft,
   type HojaRutaPayload,
   type MediaState,
+  type NombreItem,
 } from "../types";
 import { blobToBase64, compressImage, fileExt } from "../lib/imageUtils";
 import { formatDecimal } from "../lib/format";
@@ -71,11 +72,35 @@ function join(parts: (string | undefined | null)[]): string {
   return parts.filter((p) => p != null && String(p).trim() !== "").join("  |  ");
 }
 
+function nombres(list: NombreItem[]): string {
+  return list
+    .map((x) => x.nombre?.trim())
+    .filter((n): n is string => !!n)
+    .join(", ");
+}
+
+function coordStr(lat?: number, lon?: number): string {
+  return typeof lat === "number" && typeof lon === "number"
+    ? `coords ${lat.toFixed(5)}, ${lon.toFixed(5)}`
+    : "";
+}
+
 export function buildDetalle(draft: HojaRutaDraft): DetalleRow[] {
   const rows: DetalleRow[] = [];
   let orden = 0;
 
-  // Tranquera 1 (campos escalares)
+  // Baterías
+  draft.baterias.forEach((b, i) => {
+    if (!b.numero?.trim() && b.lat == null) return;
+    rows.push({
+      categoria: "BATERIA",
+      item: `Batería ${i + 1}: ${b.numero?.trim() || "N/A"}`,
+      comentarios: coordStr(b.lat, b.lon),
+      orden: orden++,
+    });
+  });
+
+  // Tranquera 1 (campos escalares + coords)
   rows.push({
     categoria: "TRANQUERA",
     item: "Tranquera 1",
@@ -85,6 +110,7 @@ export function buildDetalle(draft: HojaRutaDraft): DetalleRow[] {
         : null,
       draft.tieneGuardaganado1 ? `Guardaganado: ${draft.tieneGuardaganado1}` : null,
       draft.estadoGuardaganado1 ? `Estado: ${draft.estadoGuardaganado1}` : null,
+      coordStr(draft.tranq1Lat, draft.tranq1Lon) || null,
     ]),
     orden: orden++,
   });
@@ -97,6 +123,7 @@ export function buildDetalle(draft: HojaRutaDraft): DetalleRow[] {
         t.distanciaKm != null ? `Distancia: ${formatDecimal(t.distanciaKm)} km` : null,
         t.tieneGuardaganado ? `Guardaganado: ${t.tieneGuardaganado}` : null,
         t.estadoGuardaganado ? `Estado: ${t.estadoGuardaganado}` : null,
+        coordStr(t.lat, t.lon) || null,
       ]),
       orden: orden++,
     });
@@ -167,16 +194,16 @@ export function buildScalarPayload(draft: HojaRutaDraft, folio: string): Omit<Ho
       ? new Date(draft.fechaHoraInicioProgramada).toISOString()
       : null,
     inspectorResponsable: str(draft.inspectorResponsable),
-    pasoBateria1: str(draft.pasoBateria1),
-    pasoBateria2: str(draft.pasoBateria2),
+    pasoBateria1: str(draft.baterias[0]?.numero),
+    pasoBateria2: str(draft.baterias[1]?.numero),
     alturaMaximaCarga: num(draft.alturaMaximaCarga),
     distancia1erTranqueraKm: num(draft.distancia1erTranqueraKm),
     tieneGuardaganado1: choice(draft.tieneGuardaganado1),
     estadoGuardaganado1: choice(draft.estadoGuardaganado1),
-    circulaOtroYacimiento: choice(draft.circulaOtroYacimiento),
-    yacimientoCircula: str(draft.yacimientoCircula),
-    circulaRutasEstatales: choice(draft.circulaRutasEstatales),
-    rutasCircula: str(draft.rutasCircula),
+    circulaOtroYacimiento: nombres(draft.yacimientos) ? "Sí" : "No",
+    yacimientoCircula: nombres(draft.yacimientos),
+    circulaRutasEstatales: nombres(draft.rutas) ? "Sí" : "No",
+    rutasCircula: nombres(draft.rutas),
     planFechaInicio: draft.planFechaInicio || null,
     planHoraInicio: str(draft.planHoraInicio),
     fechaHoraFinalizacion: draft.fechaHoraFinalizacion

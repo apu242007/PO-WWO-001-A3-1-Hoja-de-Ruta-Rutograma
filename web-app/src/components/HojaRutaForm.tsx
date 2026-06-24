@@ -17,15 +17,19 @@ import {
   UNIDAD_OTRO,
   unidadLabel,
   emptyDraft,
+  newBateria,
   newCarga,
   newInterferencia,
+  newNombre,
   newTramo,
   newTranquera,
+  type Bateria,
   type Carga,
   type HojaRutaDraft,
   type Interferencia,
   type MediaSlot,
   type MediaState,
+  type NombreItem,
   type Tramo,
   type Tranquera,
 } from "../types";
@@ -34,6 +38,7 @@ import { clearDraft, loadDraft, saveDraft } from "../lib/draftStorage";
 import { loadPreparadorProfile, savePreparadorProfile } from "../lib/preparadorProfile";
 import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
+import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
 
 // Lazy-loaded: jsPDF + html2canvas + qrcode (~400 KB) only when a PDF is built.
@@ -109,7 +114,101 @@ export default function HojaRutaForm() {
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
+  // ---- auto-km desde coordenadas (línea recta, editable) ----
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const tranqSig = draft.tranqueras.map((t) => `${t.lat ?? ""},${t.lon ?? ""}`).join("|");
+  useEffect(() => {
+    setDraft((d) => {
+      let changed = false;
+      const o: Coord = { lat: d.origenLat, lon: d.origenLon };
+      const t1: Coord = { lat: d.tranq1Lat, lon: d.tranq1Lon };
+      const dest: Coord = { lat: d.destinoLat, lon: d.destinoLon };
+      const next: HojaRutaDraft = { ...d };
+
+      // distancia a la 1ª tranquera = origen → tranq1
+      const d1 = kmEntre(o, t1);
+      if (d1 != null && next.distancia1erTranqueraKm !== round1(d1)) {
+        next.distancia1erTranqueraKm = round1(d1);
+        changed = true;
+      }
+
+      // cada tranquera: distancia desde el punto anterior de la cadena
+      let prev: Coord = hasCoord(t1) ? t1 : o;
+      let tranqsChanged = false;
+      const newTranqs = d.tranqueras.map((t) => {
+        const cur: Coord = { lat: t.lat, lon: t.lon };
+        const km = kmEntre(prev, cur);
+        let nt = t;
+        if (km != null && t.distanciaKm !== round1(km)) {
+          nt = { ...t, distanciaKm: round1(km) };
+          tranqsChanged = true;
+        }
+        if (hasCoord(cur)) prev = cur;
+        return nt;
+      });
+      if (tranqsChanged) {
+        next.tranqueras = newTranqs;
+        changed = true;
+      }
+
+      // distancia total = suma de la cadena origen → tranqueras → destino
+      // (solo puntos con coords; los vacíos se saltan para no romper el segmento)
+      const chain = [o, t1, ...d.tranqueras.map((t) => ({ lat: t.lat, lon: t.lon })), dest].filter(
+        hasCoord
+      );
+      let total = 0;
+      const any = chain.length >= 2;
+      for (let i = 0; i < chain.length - 1; i++) {
+        total += kmEntre(chain[i], chain[i + 1]) ?? 0;
+      }
+      if (any) {
+        const s = formatDecimal(round1(total));
+        if (next.distanciaTotalKm !== s) {
+          next.distanciaTotalKm = s;
+          changed = true;
+        }
+      }
+      return changed ? next : d;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    draft.origenLat,
+    draft.origenLon,
+    draft.destinoLat,
+    draft.destinoLon,
+    draft.tranq1Lat,
+    draft.tranq1Lon,
+    tranqSig,
+  ]);
+
+  // ---- GPS a una coordenada ----
+  const [gpsBusy, setGpsBusy] = useState<string | null>(null);
+  async function gpsTo(slot: string, apply: (c: { lat: number; lon: number }) => void) {
+    setGpsBusy(slot);
+    setError(null);
+    try {
+      const c = await getGps();
+      apply(c);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo obtener GPS");
+    } finally {
+      setGpsBusy(null);
+    }
+  }
+
   // ---- repeat-row helpers ----
+  function patchBateria(id: string, patch: Partial<Bateria>) {
+    setDraft((d) => ({ ...d, baterias: d.baterias.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
+  }
+  function patchYacimiento(id: string, patch: Partial<NombreItem>) {
+    setDraft((d) => ({
+      ...d,
+      yacimientos: d.yacimientos.map((y) => (y.id === id ? { ...y, ...patch } : y)),
+    }));
+  }
+  function patchRuta(id: string, patch: Partial<NombreItem>) {
+    setDraft((d) => ({ ...d, rutas: d.rutas.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+  }
   function patchTranquera(id: string, patch: Partial<Tranquera>) {
     setDraft((d) => ({
       ...d,
@@ -190,10 +289,6 @@ export default function HojaRutaForm() {
     const t1 = draft.tramos[0];
     if (!t1 || t1.kmInicial == null || t1.kmFinal == null || !t1.tipoVia)
       p.push("Tramo 1 (km inicial/final + tipo de vía)");
-    if (draft.circulaOtroYacimiento === "Sí" && !draft.yacimientoCircula?.trim())
-      p.push("Indicar yacimiento");
-    if (draft.circulaRutasEstatales === "Sí" && !draft.rutasCircula?.trim())
-      p.push("Indicar ruta(s)");
     if (!media.mapaRecorrido) p.push("Foto MAPA RECORRIDO");
     if (!media.registroCargas) p.push("Registro de cargas (imagen)");
     if (!draft.declaracion) p.push("Aceptar la declaración");
@@ -438,21 +533,65 @@ export default function HojaRutaForm() {
       {/* 3 — ENCABEZADO DEL RUTOGRAMA */}
       <section className="card">
         <h2>3 · Encabezado del rutograma</h2>
+        <p className="hint">
+          Elegí una base (Cipolletti, Comodoro…) o escribí el lugar. Si cargás coordenadas (o tocás
+          📍), el km se calcula solo.
+        </p>
         <div className="grid2">
+          <div className="punto-field">
+            <label>
+              Origen *
+              <input
+                list="bases-list"
+                value={draft.origen ?? ""}
+                autoComplete="off"
+                placeholder="Base o lugar…"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const b = findBase(v);
+                  setDraft((d) => ({ ...d, origen: v, ...(b ? { origenLat: b.lat, origenLon: b.lon } : {}) }));
+                }}
+              />
+            </label>
+            <CoordRow
+              value={{ lat: draft.origenLat, lon: draft.origenLon }}
+              onChange={(c) => setDraft((d) => ({ ...d, origenLat: c.lat, origenLon: c.lon }))}
+              onGps={() => gpsTo("origen", (c) => setDraft((d) => ({ ...d, origenLat: c.lat, origenLon: c.lon })))}
+              busy={gpsBusy === "origen"}
+            />
+          </div>
+          <div className="punto-field">
+            <label>
+              Destino *
+              <input
+                list="bases-list"
+                value={draft.destino ?? ""}
+                autoComplete="off"
+                placeholder="Base o lugar…"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const b = findBase(v);
+                  setDraft((d) => ({ ...d, destino: v, ...(b ? { destinoLat: b.lat, destinoLon: b.lon } : {}) }));
+                }}
+              />
+            </label>
+            <CoordRow
+              value={{ lat: draft.destinoLat, lon: draft.destinoLon }}
+              onChange={(c) => setDraft((d) => ({ ...d, destinoLat: c.lat, destinoLon: c.lon }))}
+              onGps={() => gpsTo("destino", (c) => setDraft((d) => ({ ...d, destinoLat: c.lat, destinoLon: c.lon })))}
+              busy={gpsBusy === "destino"}
+            />
+          </div>
           <label>
-            Origen *
-            <input value={draft.origen ?? ""} onChange={(e) => set("origen", e.target.value)} />
-          </label>
-          <label>
-            Destino *
-            <input value={draft.destino ?? ""} onChange={(e) => set("destino", e.target.value)} />
-          </label>
-          <label>
-            Distancia total (km)
+            Distancia total (km){" "}
+            {hasCoord({ lat: draft.origenLat, lon: draft.origenLon }) &&
+              hasCoord({ lat: draft.destinoLat, lon: draft.destinoLon }) && (
+                <span className="auto-tag">auto</span>
+              )}
             <input
               value={draft.distanciaTotalKm ?? ""}
               onChange={(e) => set("distanciaTotalKm", e.target.value)}
-              placeholder="ej: 120 km"
+              placeholder="auto desde coords o manual"
             />
           </label>
           <label>
@@ -463,38 +602,73 @@ export default function HojaRutaForm() {
               onChange={(e) => set("fechaHoraInicioProgramada", e.target.value)}
             />
           </label>
-          <label>
+          <label className="span-full">
             Inspector / Responsable *
             <input
               value={draft.inspectorResponsable ?? ""}
               onChange={(e) => set("inspectorResponsable", e.target.value)}
             />
           </label>
-          <label>
-            Paso por Batería Nº (N/A si no corresponde)
-            <input value={draft.pasoBateria1 ?? ""} onChange={(e) => set("pasoBateria1", e.target.value)} />
-          </label>
         </div>
+        <datalist id="bases-list">
+          {BASES.map((b) => (
+            <option key={b.nombre} value={b.nombre} />
+          ))}
+        </datalist>
       </section>
 
-      {/* 4 — SEGUNDO PASO + ALTURA */}
+      {/* 4 — PASOS POR BATERÍA + ALTURA */}
       <section className="card">
-        <h2>4 · Segundo paso por batería y altura</h2>
-        <div className="grid2">
-          <label>
-            Paso por Batería Nº (N/A si no corresponde)
-            <input value={draft.pasoBateria2 ?? ""} onChange={(e) => set("pasoBateria2", e.target.value)} />
-          </label>
-          <label>
-            Altura máxima de la carga (mts)
-            <input
-              inputMode="decimal"
-              value={draft.alturaMaximaCarga != null ? String(draft.alturaMaximaCarga).replace(".", ",") : ""}
-              onChange={(e) => set("alturaMaximaCarga", parseDecimal(e.target.value))}
-              placeholder="ej: 4,40"
-            />
-          </label>
-        </div>
+        <h2>4 · Pasos por batería y altura</h2>
+        <p className="hint">Agregá los pasos por batería que correspondan (N/A si no aplica).</p>
+        {draft.baterias.map((b, i) => (
+          <div className="repeat-row" key={b.id}>
+            <div className="repeat-head">
+              <span>Batería {i + 1}</span>
+              {draft.baterias.length > 1 && (
+                <button
+                  type="button"
+                  className="btn-del"
+                  onClick={() => setDraft((d) => ({ ...d, baterias: d.baterias.filter((x) => x.id !== b.id) }))}
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+            <div className="punto-field">
+              <label>
+                Paso por Batería Nº (N/A si no corresponde)
+                <input
+                  value={b.numero ?? ""}
+                  onChange={(e) => patchBateria(b.id, { numero: e.target.value })}
+                  placeholder="ej: 12 ó N/A"
+                />
+              </label>
+              <CoordRow
+                value={{ lat: b.lat, lon: b.lon }}
+                onChange={(c) => patchBateria(b.id, { lat: c.lat, lon: c.lon })}
+                onGps={() => gpsTo(`bat-${b.id}`, (c) => patchBateria(b.id, { lat: c.lat, lon: c.lon }))}
+                busy={gpsBusy === `bat-${b.id}`}
+              />
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="btn-add"
+          onClick={() => setDraft((d) => ({ ...d, baterias: [...d.baterias, newBateria()] }))}
+        >
+          + Agregar batería
+        </button>
+        <label className="span-full" style={{ marginTop: 12 }}>
+          Altura máxima de la carga (mts)
+          <input
+            inputMode="decimal"
+            value={draft.alturaMaximaCarga != null ? String(draft.alturaMaximaCarga).replace(".", ",") : ""}
+            onChange={(e) => set("alturaMaximaCarga", parseDecimal(e.target.value))}
+            placeholder="ej: 4,40"
+          />
+        </label>
         {altaAlerta && (
           <div className="alert-warn">
             ⚠️ Carga superior a {ALTURA_LIMITE_CARGA.toString().replace(".", ",")} m: aplicar el
@@ -514,9 +688,22 @@ export default function HojaRutaForm() {
       {/* 5/6 — TRANQUERA 1 + diagrama */}
       <section className="card">
         <h2>5 · Información del recorrido — 1ª tranquera</h2>
+        <div className="punto-field" style={{ marginBottom: 12 }}>
+          <span className="media-label">Coordenadas 1ª tranquera (opcional → km auto desde origen)</span>
+          <CoordRow
+            value={{ lat: draft.tranq1Lat, lon: draft.tranq1Lon }}
+            onChange={(c) => setDraft((d) => ({ ...d, tranq1Lat: c.lat, tranq1Lon: c.lon }))}
+            onGps={() => gpsTo("tranq1", (c) => setDraft((d) => ({ ...d, tranq1Lat: c.lat, tranq1Lon: c.lon })))}
+            busy={gpsBusy === "tranq1"}
+          />
+        </div>
         <div className="grid3">
           <label>
-            Distancia a la 1ª tranquera (kms)
+            Distancia a la 1ª tranquera (kms){" "}
+            {hasCoord({ lat: draft.origenLat, lon: draft.origenLon }) &&
+              hasCoord({ lat: draft.tranq1Lat, lon: draft.tranq1Lon }) && (
+                <span className="auto-tag">auto</span>
+              )}
             <input
               inputMode="decimal"
               value={draft.distancia1erTranqueraKm != null ? String(draft.distancia1erTranqueraKm).replace(".", ",") : ""}
@@ -578,9 +765,19 @@ export default function HojaRutaForm() {
                 Quitar
               </button>
             </div>
+            <div className="punto-field" style={{ marginBottom: 10 }}>
+              <span className="media-label">Coordenadas (opcional → km auto desde la anterior)</span>
+              <CoordRow
+                value={{ lat: t.lat, lon: t.lon }}
+                onChange={(c) => patchTranquera(t.id, { lat: c.lat, lon: c.lon })}
+                onGps={() => gpsTo(`tq-${t.id}`, (c) => patchTranquera(t.id, { lat: c.lat, lon: c.lon }))}
+                busy={gpsBusy === `tq-${t.id}`}
+              />
+            </div>
             <div className="grid3">
               <label>
-                Distancia a la próxima tranquera (kms)
+                Distancia a la próxima tranquera (kms){" "}
+                {hasCoord({ lat: t.lat, lon: t.lon }) && <span className="auto-tag">auto</span>}
                 <input
                   inputMode="decimal"
                   value={t.distanciaKm != null ? String(t.distanciaKm).replace(".", ",") : ""}
@@ -849,47 +1046,65 @@ export default function HojaRutaForm() {
       {/* YACIMIENTOS / RUTAS */}
       <section className="card">
         <h2>9 · Otros yacimientos y rutas</h2>
-        <div className="grid2">
-          <label>
-            ¿Circula por otro yacimiento?
-            <select
-              value={draft.circulaOtroYacimiento ?? ""}
-              onChange={(e) => set("circulaOtroYacimiento", (e.target.value || undefined) as HojaRutaDraft["circulaOtroYacimiento"])}
+
+        <div className="lista-block">
+          <div className="fotos-head">
+            <span>Yacimientos por los que circula</span>
+            <button
+              type="button"
+              className="btn-add-foto"
+              onClick={() => setDraft((d) => ({ ...d, yacimientos: [...d.yacimientos, newNombre()] }))}
             >
-              <option value="">—</option>
-              {SI_NO.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </label>
-          {draft.circulaOtroYacimiento === "Sí" && (
-            <label>
-              Indique por qué yacimiento circula *
-              <input value={draft.yacimientoCircula ?? ""} onChange={(e) => set("yacimientoCircula", e.target.value)} />
-            </label>
-          )}
-          <label>
-            ¿Circula por rutas estatales o ciudad?
-            <select
-              value={draft.circulaRutasEstatales ?? ""}
-              onChange={(e) => set("circulaRutasEstatales", (e.target.value || undefined) as HojaRutaDraft["circulaRutasEstatales"])}
+              + Agregar yacimiento
+            </button>
+          </div>
+          {draft.yacimientos.length === 0 && <p className="hint">Ninguno (no circula por otro yacimiento).</p>}
+          {draft.yacimientos.map((y, i) => (
+            <div className="inline-row" key={y.id}>
+              <input
+                value={y.nombre ?? ""}
+                placeholder={`Yacimiento ${i + 1}`}
+                onChange={(e) => patchYacimiento(y.id, { nombre: e.target.value })}
+              />
+              <button
+                type="button"
+                className="btn-del"
+                onClick={() => setDraft((d) => ({ ...d, yacimientos: d.yacimientos.filter((x) => x.id !== y.id) }))}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="lista-block" style={{ marginTop: 14 }}>
+          <div className="fotos-head">
+            <span>Rutas estatales / ciudad por las que circula</span>
+            <button
+              type="button"
+              className="btn-add-foto"
+              onClick={() => setDraft((d) => ({ ...d, rutas: [...d.rutas, newNombre()] }))}
             >
-              <option value="">—</option>
-              {SI_NO.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </label>
-          {draft.circulaRutasEstatales === "Sí" && (
-            <label>
-              Indique la/s ruta/s por la que circula *
-              <input value={draft.rutasCircula ?? ""} onChange={(e) => set("rutasCircula", e.target.value)} />
-            </label>
-          )}
+              + Agregar ruta
+            </button>
+          </div>
+          {draft.rutas.length === 0 && <p className="hint">Ninguna (no circula por rutas estatales/ciudad).</p>}
+          {draft.rutas.map((r, i) => (
+            <div className="inline-row" key={r.id}>
+              <input
+                value={r.nombre ?? ""}
+                placeholder={`Ruta ${i + 1} (ej: RP5)`}
+                onChange={(e) => patchRuta(r.id, { nombre: e.target.value })}
+              />
+              <button
+                type="button"
+                className="btn-del"
+                onClick={() => setDraft((d) => ({ ...d, rutas: d.rutas.filter((x) => x.id !== r.id) }))}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -1105,6 +1320,43 @@ export default function HojaRutaForm() {
         </button>
       </div>
       <p className="autosave-note">Tu progreso se guarda automáticamente en este dispositivo.</p>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// CoordRow — lat/lon manual inputs + GPS button
+// ----------------------------------------------------------------------------
+function CoordRow({
+  value,
+  onChange,
+  onGps,
+  busy,
+}: {
+  value: Coord;
+  onChange: (c: Coord) => void;
+  onGps: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="coord-row">
+      <input
+        className="coord-in"
+        inputMode="decimal"
+        value={fmtCoord(value.lat)}
+        placeholder="Lat -38.957851"
+        onChange={(e) => onChange({ lat: parseCoord(e.target.value), lon: value.lon })}
+      />
+      <input
+        className="coord-in"
+        inputMode="decimal"
+        value={fmtCoord(value.lon)}
+        placeholder="Lon -67.974515"
+        onChange={(e) => onChange({ lat: value.lat, lon: parseCoord(e.target.value) })}
+      />
+      <button type="button" className="btn-gps" onClick={onGps} disabled={busy} title="Usar mi ubicación">
+        {busy ? "📍…" : "📍 GPS"}
+      </button>
     </div>
   );
 }

@@ -209,19 +209,46 @@ export async function buildHojaRutaPdf(input: PdfInput): Promise<Blob> {
 
   // ---- 3. Encabezado del rutograma ----
   sectionTitle("3 - ENCABEZADO DEL RUTOGRAMA");
+  const origenTxt =
+    (draft.origen ?? "") +
+    (typeof draft.origenLat === "number" && typeof draft.origenLon === "number"
+      ? `  (${draft.origenLat.toFixed(5)}, ${draft.origenLon.toFixed(5)})`
+      : "");
+  const destinoTxt =
+    (draft.destino ?? "") +
+    (typeof draft.destinoLat === "number" && typeof draft.destinoLon === "number"
+      ? `  (${draft.destinoLat.toFixed(5)}, ${draft.destinoLon.toFixed(5)})`
+      : "");
   kvTable([
-    ["Origen", draft.origen ?? ""],
-    ["Destino", draft.destino ?? ""],
+    ["Origen", origenTxt],
+    ["Destino", destinoTxt],
     ["Distancia total (km)", draft.distanciaTotalKm ?? ""],
     ["Inicio programado", displayDateTime(draft.fechaHoraInicioProgramada)],
     ["Inspector / Responsable", draft.inspectorResponsable ?? ""],
-    ["Paso por Bateria Nro", draft.pasoBateria1 ?? ""],
   ]);
 
-  // ---- 4. Segundo paso + altura ----
-  sectionTitle("4 - SEGUNDO PASO POR BATERIA Y ALTURA");
+  // ---- 4. Pasos por batería + altura ----
+  sectionTitle("4 - PASOS POR BATERIA Y ALTURA");
+  const baterias = draft.baterias.filter((b) => b.numero?.trim() || b.lat != null);
+  if (baterias.length) {
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin },
+      theme: "striped",
+      headStyles: { fillColor: [11, 61, 92] },
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 1.6 },
+      head: [["#", "Paso por Bateria Nro", "Coordenadas"]],
+      body: baterias.map((b, i) =>
+        [
+          String(i + 1),
+          b.numero?.trim() || "N/A",
+          b.lat != null && b.lon != null ? `${b.lat.toFixed(5)}, ${b.lon.toFixed(5)}` : "—",
+        ].map(safe)
+      ),
+    });
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+  }
   kvTable([
-    ["Paso por Bateria Nro (2)", draft.pasoBateria2 ?? ""],
     [
       "Altura maxima de la carga (mts)",
       draft.alturaMaximaCarga != null ? formatDecimal(draft.alturaMaximaCarga) : "",
@@ -353,10 +380,20 @@ export async function buildHojaRutaPdf(input: PdfInput): Promise<Blob> {
   // ---- Yacimientos / rutas ----
   sectionTitle("OTROS YACIMIENTOS Y RUTAS");
   kvTable([
-    ["Circula por otro yacimiento", draft.circulaOtroYacimiento ?? ""],
-    ["Yacimiento(s)", draft.yacimientoCircula ?? ""],
-    ["Circula por rutas estatales / ciudad", draft.circulaRutasEstatales ?? ""],
-    ["Ruta(s)", draft.rutasCircula ?? ""],
+    [
+      "Yacimiento(s)",
+      draft.yacimientos
+        .map((y) => y.nombre?.trim())
+        .filter(Boolean)
+        .join(", ") || "Ninguno",
+    ],
+    [
+      "Ruta(s) estatales / ciudad",
+      draft.rutas
+        .map((r) => r.nombre?.trim())
+        .filter(Boolean)
+        .join(", ") || "Ninguna",
+    ],
   ]);
 
   // ---- Plan ----
