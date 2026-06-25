@@ -267,6 +267,12 @@ export default function HojaRutaForm() {
       }
     });
   }
+  function setMapOrigen(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, origenLat: c.lat, origenLon: c.lon }));
+  }
+  function setMapDestino(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, destinoLat: c.lat, destinoLon: c.lon }));
+  }
   function addMapTranquera(c: { lat: number; lon: number }) {
     setDraft((d) => ({ ...d, tranqueras: [...d.tranqueras, { ...newTranquera(), lat: c.lat, lon: c.lon }] }));
   }
@@ -932,10 +938,10 @@ export default function HojaRutaForm() {
       <section className="card">
         <h2>Mapa de ruta (editable)</h2>
         <p className="hint">
-          Arrastrá los marcadores para reubicar origen, destino, tranqueras y baterías. Con los modos{" "}
-          <strong>＋ Tranquera</strong> / <strong>＋ Batería</strong> tocá el mapa para agregar puntos;
-          el popup de cada marcador permite quitarlo. El encuadre actual se adjunta al envío y al PDF
-          (OpenStreetMap; esquema si no hay conexión).
+          Tocá <strong>＋ Origen</strong> / <strong>＋ Destino</strong> y marcá el punto en el mapa
+          (o reubicalos arrastrando). Con <strong>＋ Tranquera</strong> / <strong>＋ Batería</strong>{" "}
+          agregás más puntos; el popup de cada marcador permite quitarlo. El encuadre actual se adjunta
+          al envío y al PDF (OpenStreetMap; esquema si no hay conexión).
         </p>
         {!puedeMapa && (
           <p className="hint">
@@ -947,6 +953,8 @@ export default function HojaRutaForm() {
           <MapaEditor
             points={editablePoints}
             onMovePoint={moveMapPoint}
+            onSetOrigen={setMapOrigen}
+            onSetDestino={setMapDestino}
             onAddTranquera={addMapTranquera}
             onAddBateria={addMapBateria}
             onDeletePoint={deleteMapPoint}

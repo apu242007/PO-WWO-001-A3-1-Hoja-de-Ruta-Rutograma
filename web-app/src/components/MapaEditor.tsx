@@ -29,6 +29,10 @@ export interface EditablePoint {
 export interface MapaEditorProps {
   points: EditablePoint[];
   onMovePoint: (ref: PointRef, c: { lat: number; lon: number }) => void;
+  /** Fija (o reubica) origen tocando el mapa. */
+  onSetOrigen: (c: { lat: number; lon: number }) => void;
+  /** Fija (o reubica) destino tocando el mapa. */
+  onSetDestino: (c: { lat: number; lon: number }) => void;
   onAddTranquera: (c: { lat: number; lon: number }) => void;
   onAddBateria: (c: { lat: number; lon: number }) => void;
   /** No-op para origen/destino (roles fijos). */
@@ -36,7 +40,7 @@ export interface MapaEditorProps {
   onViewChange?: (v: { lat: number; lon: number; zoom: number }) => void;
 }
 
-type Modo = "mover" | "add-tranquera" | "add-bateria";
+type Modo = "mover" | "set-origen" | "set-destino" | "add-tranquera" | "add-bateria";
 
 const COLORS: Record<PointKind, string> = {
   origen: "#1a7f3c",
@@ -72,6 +76,8 @@ function refKey(ref: PointRef): string {
 export default function MapaEditor({
   points,
   onMovePoint,
+  onSetOrigen,
+  onSetDestino,
   onAddTranquera,
   onAddBateria,
   onDeletePoint,
@@ -85,8 +91,8 @@ export default function MapaEditor({
   // Props/estado más recientes para los handlers registrados una sola vez.
   const modoRef = useRef<Modo>(modo);
   modoRef.current = modo;
-  const handlersRef = useRef({ onAddTranquera, onAddBateria, onViewChange });
-  handlersRef.current = { onAddTranquera, onAddBateria, onViewChange };
+  const handlersRef = useRef({ onSetOrigen, onSetDestino, onAddTranquera, onAddBateria, onViewChange });
+  handlersRef.current = { onSetOrigen, onSetDestino, onAddTranquera, onAddBateria, onViewChange };
   const didFitRef = useRef(false);
 
   // ---- init mapa (una vez) ----
@@ -111,15 +117,28 @@ export default function MapaEditor({
     // (Suspense / layout). Un tick después del montaje.
     const sizeTimer = setTimeout(() => map.invalidateSize(), 0);
 
-    // click en el mapa → agrega punto según el modo activo
+    // click en el mapa → fija/agrega punto según el modo activo
     map.on("click", (e: L.LeafletMouseEvent) => {
-      const m = modoRef.current;
-      if (m === "add-tranquera") {
-        handlersRef.current.onAddTranquera({ lat: e.latlng.lat, lon: e.latlng.lng });
-        setModo("mover");
-      } else if (m === "add-bateria") {
-        handlersRef.current.onAddBateria({ lat: e.latlng.lat, lon: e.latlng.lng });
-        setModo("mover");
+      const c = { lat: e.latlng.lat, lon: e.latlng.lng };
+      switch (modoRef.current) {
+        case "set-origen":
+          handlersRef.current.onSetOrigen(c);
+          setModo("mover");
+          break;
+        case "set-destino":
+          handlersRef.current.onSetDestino(c);
+          setModo("mover");
+          break;
+        case "add-tranquera":
+          handlersRef.current.onAddTranquera(c);
+          setModo("mover");
+          break;
+        case "add-bateria":
+          handlersRef.current.onAddBateria(c);
+          setModo("mover");
+          break;
+        default:
+          break;
       }
     });
 
@@ -236,6 +255,20 @@ export default function MapaEditor({
           onClick={() => setModo("mover")}
         >
           ✋ Mover
+        </button>
+        <button
+          type="button"
+          className={`mapa-mode mode-origen ${modo === "set-origen" ? "is-active" : ""}`}
+          onClick={() => setModo((m) => (m === "set-origen" ? "mover" : "set-origen"))}
+        >
+          ＋ Origen
+        </button>
+        <button
+          type="button"
+          className={`mapa-mode mode-destino ${modo === "set-destino" ? "is-active" : ""}`}
+          onClick={() => setModo((m) => (m === "set-destino" ? "mover" : "set-destino"))}
+        >
+          ＋ Destino
         </button>
         <button
           type="button"

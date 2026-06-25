@@ -232,6 +232,14 @@ body {
   background: var(--navy);
   color: #fff;
 }
+.mapa-mode.mode-origen.is-active {
+  background: #1a7f3c;
+  border-color: #1a7f3c;
+}
+.mapa-mode.mode-destino.is-active {
+  background: #c0271f;
+  border-color: #c0271f;
+}
 .mapa-mode-hint {
   font-size: 0.82rem;
   color: var(--navy-2);
