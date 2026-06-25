@@ -31,6 +31,8 @@ export interface MapaEditorProps {
   points: EditablePoint[];
   /** Geometría vial (sigue calles). Si falta → ruta línea recta entre puntos. */
   routeGeometry?: LatLon[] | null;
+  /** Traza GPS cruda en vivo (puntos capturados) — se dibuja punteada. */
+  trace?: LatLon[] | null;
   /** Texto de estado de la ruta para la barra (ej. "ruta por calles"). */
   routeBadge?: string | null;
   onMovePoint: (ref: PointRef, c: { lat: number; lon: number }) => void;
@@ -81,6 +83,7 @@ function refKey(ref: PointRef): string {
 export default function MapaEditor({
   points,
   routeGeometry,
+  trace,
   routeBadge,
   onMovePoint,
   onSetOrigen,
@@ -184,6 +187,7 @@ export default function MapaEditor({
   const geomSig = routeGeometry
     ? `${routeGeometry.length}:${routeGeometry[0]?.join(",")}:${routeGeometry[routeGeometry.length - 1]?.join(",")}`
     : "";
+  const traceSig = trace ? `${trace.length}:${trace[trace.length - 1]?.join(",")}` : "";
   useEffect(() => {
     const map = mapRef.current;
     const layer = layerRef.current;
@@ -200,6 +204,14 @@ export default function MapaEditor({
     if (routeLatLngs.length >= 2) {
       L.polyline(routeLatLngs, { color: "#ffffff", weight: 8, opacity: 0.9 }).addTo(layer);
       L.polyline(routeLatLngs, { color: "#0b3d5c", weight: 4 }).addTo(layer);
+    }
+
+    // Traza GPS cruda en vivo (punteada naranja) — la grabación antes de snappear
+    if (trace && trace.length >= 2) {
+      L.polyline(
+        trace.map((t) => [t[0], t[1]] as [number, number]),
+        { color: "#f5a623", weight: 3, opacity: 0.85, dashArray: "4 6" }
+      ).addTo(layer);
     }
 
     // Marcadores
@@ -258,7 +270,7 @@ export default function MapaEditor({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointsSig, geomSig]);
+  }, [pointsSig, geomSig, traceSig]);
 
   return (
     <div className="mapa-editor">

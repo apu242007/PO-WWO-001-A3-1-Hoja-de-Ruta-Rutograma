@@ -40,7 +40,8 @@ import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
 import { buildRouteMapImage, type MapPoint, type MapView } from "../lib/routeMap";
-import { fetchRoadRoute, type LatLon } from "../lib/routing";
+import { fetchRoadRoute, matchTraceToRoads, type LatLon } from "../lib/routing";
+import { useGpsTracker, postTrackPing, isTrackBackendConfigured } from "../lib/tracking";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
 import type { EditablePoint, PointRef } from "./MapaEditor";
 
@@ -270,20 +271,57 @@ export default function HojaRutaForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainSig]);
 
-  const routeBadge =
-    chainForRoute.length < 2
-      ? null
-      : routeLoading
-        ? "calculando ruta…"
-        : routeGeometry
-          ? "🛣️ ruta por calles"
-          : "📏 línea recta (sin ruteo)";
+  // ---- tracking GPS en vivo + map-matching (snap a calles) ----
+  const [tracedGeometry, setTracedGeometry] = useState<LatLon[] | null>(null);
+  const [snapping, setSnapping] = useState(false);
+  const tracker = useGpsTracker((p) => {
+    void postTrackPing(p, draft.unidadRecorrido ?? "", draft.folio ?? "");
+  });
+  const tracePoints = useMemo<LatLon[]>(
+    () => tracker.points.map((p) => [p.lat, p.lon] as LatLon),
+    [tracker.points]
+  );
+
+  async function detenerYSnappear() {
+    tracker.stop();
+    if (tracker.points.length < 2) return;
+    setSnapping(true);
+    try {
+      const r = await matchTraceToRoads(tracker.points.map((p) => ({ lat: p.lat, lon: p.lon })));
+      setTracedGeometry(r ? r.geometry : null);
+      if (!r) setError("No se pudo ajustar la traza a calles. Revisá la conexión e intentá de nuevo.");
+    } finally {
+      setSnapping(false);
+    }
+  }
+  function limpiarTraza() {
+    tracker.clear();
+    setTracedGeometry(null);
+  }
+
+  // Geometría efectiva del mapa: la traza GPS snappeada tiene prioridad sobre la
+  // ruta planificada por waypoints.
+  const effectiveGeometry = tracedGeometry ?? routeGeometry;
+
+  const routeBadge = tracedGeometry
+    ? "🛰️ traza GPS (calles)"
+    : tracker.tracking
+      ? "🛰️ grabando traza…"
+      : snapping
+        ? "ajustando traza a calles…"
+        : chainForRoute.length < 2
+          ? null
+          : routeLoading
+            ? "calculando ruta…"
+            : routeGeometry
+              ? "🛣️ ruta por calles"
+              : "📏 línea recta (sin ruteo)";
 
   // Genera el PNG del mapa con el encuadre actual del editor. null si no hay puntos.
   async function renderMapaPng(): Promise<string | null> {
-    if (routePoints.length < 1) return null;
+    if (routePoints.length < 1 && !effectiveGeometry) return null;
     try {
-      return await buildRouteMapImage(routePoints, mapaView ?? undefined, routeGeometry);
+      return await buildRouteMapImage(routePoints, mapaView ?? undefined, effectiveGeometry);
     } catch {
       return null;
     }
@@ -520,6 +558,9 @@ export default function HojaRutaForm() {
     setFotosPorTramo({});
     setMapaView(null);
     setRouteGeometry(null);
+    tracker.stop();
+    tracker.clear();
+    setTracedGeometry(null);
     setSuccess(null);
     setError(null);
   }
@@ -994,7 +1035,8 @@ export default function HojaRutaForm() {
         <Suspense fallback={<div className="mapa-loading">Cargando mapa…</div>}>
           <MapaEditor
             points={editablePoints}
-            routeGeometry={routeGeometry}
+            routeGeometry={effectiveGeometry}
+            trace={tracedGeometry ? null : tracePoints.length >= 2 ? tracePoints : null}
             routeBadge={routeBadge}
             onMovePoint={moveMapPoint}
             onSetOrigen={setMapOrigen}
@@ -1005,6 +1047,48 @@ export default function HojaRutaForm() {
             onViewChange={setMapaView}
           />
         </Suspense>
+
+        {/* Tracking GPS en vivo → map-matching (snap a calles) */}
+        <div className="tracking-panel">
+          <div className="tracking-head">
+            <span>📡 Tracking GPS en vivo</span>
+            <span className="tracking-status">
+              {tracker.tracking
+                ? `grabando · ${tracker.points.length} pts`
+                : snapping
+                  ? "ajustando a calles…"
+                  : tracedGeometry
+                    ? `traza ajustada (${tracker.points.length} pts)`
+                    : tracker.points.length
+                      ? `${tracker.points.length} pts sin ajustar`
+                      : "detenido"}
+            </span>
+          </div>
+          <div className="actions" style={{ marginTop: 8 }}>
+            {!tracker.tracking ? (
+              <button type="button" className="btn-primary" onClick={() => tracker.start(10000)}>
+                ▶ Iniciar tracking
+              </button>
+            ) : (
+              <button type="button" className="btn-primary" onClick={detenerYSnappear}>
+                ■ Detener y ajustar a calles
+              </button>
+            )}
+            {!tracker.tracking && tracker.points.length > 0 && (
+              <button type="button" className="btn-ghost" onClick={limpiarTraza}>
+                Limpiar traza
+              </button>
+            )}
+          </div>
+          {tracker.error && <div className="error-box" style={{ marginTop: 8 }}>⚠️ {tracker.error}</div>}
+          <p className="hint" style={{ marginTop: 8 }}>
+            Captura la posición cada 10 s y la ajusta a calles reales (OSRM). La traza ajustada se usa
+            como ruta del rutograma (se adjunta al PDF/envío).{" "}
+            {isTrackBackendConfigured
+              ? "Cada punto se envía a /track."
+              : "Persistencia /track no configurada — los puntos no se envían al servidor."}
+          </p>
+        </div>
       </section>
 
       {/* TRAMOS */}
