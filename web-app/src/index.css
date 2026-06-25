@@ -207,13 +207,61 @@ body {
   flex: 1;
 }
 
-.mapa-ruta-img {
+/* ---- Mapa editor (Leaflet) ---- */
+.mapa-editor {
+  margin-top: 4px;
+}
+.mapa-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.mapa-mode {
+  background: #fff;
+  color: var(--navy);
+  border: 1.5px solid var(--navy);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mapa-mode.is-active {
+  background: var(--navy);
+  color: #fff;
+}
+.mapa-mode-hint {
+  font-size: 0.82rem;
+  color: var(--navy-2);
+  font-weight: 600;
+}
+.mapa-canvas {
   width: 100%;
-  max-width: 620px;
+  height: 400px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  display: block;
-  margin: 4px auto 0;
+  /* Leaflet pinta tiles/markers como hijos; mantené el clip y un z-index bajo
+     para no taparte por encima de los popups del propio mapa. */
+  overflow: hidden;
+  z-index: 0;
+}
+.mapa-loading {
+  width: 100%;
+  height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px dashed var(--navy-2);
+  color: var(--navy-2);
+  background: #f1f5f8;
+}
+/* Leaflet pin sin sombra de caja por defecto */
+.leaflet-div-icon.mapa-pin {
+  background: transparent;
+  border: none;
 }
 
 @media (max-width: 680px) {

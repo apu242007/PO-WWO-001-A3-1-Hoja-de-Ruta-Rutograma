@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   ALTURA_LIMITE_CARGA,
   CLIENTES,
@@ -39,11 +39,15 @@ import { loadPreparadorProfile, savePreparadorProfile } from "../lib/preparadorP
 import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
-import { buildRouteMapImage, type MapPoint } from "../lib/routeMap";
+import { buildRouteMapImage, type MapPoint, type MapView } from "../lib/routeMap";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
+import type { EditablePoint, PointRef } from "./MapaEditor";
 
 // Lazy-loaded: jsPDF + html2canvas + qrcode (~400 KB) only when a PDF is built.
 const loadPdf = () => import("../lib/pdfGenerator").then((m) => m.buildHojaRutaPdf);
+
+// Lazy-loaded: Leaflet (~42 KB gzip) + su CSS sólo cuando el mapa monta.
+const MapaEditor = lazy(() => import("./MapaEditor"));
 
 interface SuccessInfo {
   folio: string;
@@ -197,68 +201,98 @@ export default function HojaRutaForm() {
     }
   }
 
-  // ---- mapa de ruta (virtual) ----
-  const [mapaRutaUrl, setMapaRutaUrl] = useState<string | null>(null);
-  const [mapaBusy, setMapaBusy] = useState(false);
+  // ---- mapa de ruta (editor Leaflet) ----
+  const [mapaView, setMapaView] = useState<MapView | null>(null);
 
-  const routePoints = useMemo((): MapPoint[] => {
-    const pts: MapPoint[] = [];
+  // Puntos editables — orden de cadena: origen → 1ª tranquera → tranqueras →
+  // destino, luego baterías sueltas. Fuente única: draft. Lo leen el editor
+  // (interactivo) y el renderer (PNG del PDF/adjunto).
+  const editablePoints = useMemo<EditablePoint[]>(() => {
+    const pts: EditablePoint[] = [];
     if (hasCoord({ lat: draft.origenLat, lon: draft.origenLon }))
-      pts.push({ lat: draft.origenLat!, lon: draft.origenLon!, label: draft.origen || "Origen", kind: "origen" });
-    draft.baterias.forEach((b) => {
-      if (hasCoord({ lat: b.lat, lon: b.lon })) pts.push({ lat: b.lat!, lon: b.lon!, kind: "bateria" });
-    });
+      pts.push({ ref: { kind: "origen" }, lat: draft.origenLat!, lon: draft.origenLon!, kind: "origen", name: draft.origen || "Origen" });
     if (hasCoord({ lat: draft.tranq1Lat, lon: draft.tranq1Lon }))
-      pts.push({ lat: draft.tranq1Lat!, lon: draft.tranq1Lon!, kind: "gate" });
+      pts.push({ ref: { kind: "tranq1" }, lat: draft.tranq1Lat!, lon: draft.tranq1Lon!, kind: "gate", name: "1ª tranquera" });
     draft.tranqueras.forEach((t) => {
-      if (hasCoord({ lat: t.lat, lon: t.lon })) pts.push({ lat: t.lat!, lon: t.lon!, kind: "gate" });
+      if (hasCoord({ lat: t.lat, lon: t.lon }))
+        pts.push({ ref: { kind: "tranquera", id: t.id }, lat: t.lat!, lon: t.lon!, kind: "gate", name: "Tranquera" });
     });
     if (hasCoord({ lat: draft.destinoLat, lon: draft.destinoLon }))
-      pts.push({ lat: draft.destinoLat!, lon: draft.destinoLon!, label: draft.destino || "Destino", kind: "destino" });
+      pts.push({ ref: { kind: "destino" }, lat: draft.destinoLat!, lon: draft.destinoLon!, kind: "destino", name: draft.destino || "Destino" });
+    draft.baterias.forEach((b) => {
+      if (hasCoord({ lat: b.lat, lon: b.lon }))
+        pts.push({ ref: { kind: "bateria", id: b.id }, lat: b.lat!, lon: b.lon!, kind: "bateria", name: "Batería" });
+    });
     return pts;
   }, [
-    draft.origenLat,
-    draft.origenLon,
-    draft.destinoLat,
-    draft.destinoLon,
-    draft.tranq1Lat,
-    draft.tranq1Lon,
-    draft.origen,
-    draft.destino,
-    draft.baterias,
-    draft.tranqueras,
+    draft.origenLat, draft.origenLon, draft.destinoLat, draft.destinoLon,
+    draft.tranq1Lat, draft.tranq1Lon, draft.origen, draft.destino,
+    draft.baterias, draft.tranqueras,
   ]);
+
+  // MapPoint[] para el renderer del PNG (deriva de editablePoints, mismo orden)
+  const routePoints = useMemo<MapPoint[]>(
+    () => editablePoints.map((p) => ({ lat: p.lat, lon: p.lon, kind: p.kind, label: p.name })),
+    [editablePoints]
+  );
 
   const puedeMapa = routePoints.length >= 2;
 
-  async function generarMapa() {
-    if (!puedeMapa) return;
-    setMapaBusy(true);
-    setError(null);
+  // Genera el PNG del mapa con el encuadre actual del editor. null si no hay puntos.
+  async function renderMapaPng(): Promise<string | null> {
+    if (routePoints.length < 1) return null;
     try {
-      const url = await buildRouteMapImage(routePoints);
-      setMapaRutaUrl(url);
-      if (!url) setError("No se pudo generar el mapa.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo generar el mapa.");
-    } finally {
-      setMapaBusy(false);
+      return await buildRouteMapImage(routePoints, mapaView ?? undefined);
+    } catch {
+      return null;
     }
   }
 
-  // auto-genera cuando hay origen+destino con coords (con debounce)
-  const routeSig = routePoints.map((p) => `${p.lat},${p.lon}`).join("|");
-  useEffect(() => {
-    if (routePoints.length < 2) {
-      setMapaRutaUrl(null);
-      return;
-    }
-    const t = setTimeout(() => {
-      buildRouteMapImage(routePoints).then((url) => url && setMapaRutaUrl(url)).catch(() => {});
-    }, 700);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSig]);
+  // ---- handlers del editor (bidireccional con el draft) ----
+  function moveMapPoint(ref: PointRef, c: { lat: number; lon: number }) {
+    setDraft((d) => {
+      switch (ref.kind) {
+        case "origen":
+          return { ...d, origenLat: c.lat, origenLon: c.lon };
+        case "destino":
+          return { ...d, destinoLat: c.lat, destinoLon: c.lon };
+        case "tranq1":
+          return { ...d, tranq1Lat: c.lat, tranq1Lon: c.lon };
+        case "tranquera":
+          return { ...d, tranqueras: d.tranqueras.map((t) => (t.id === ref.id ? { ...t, lat: c.lat, lon: c.lon } : t)) };
+        case "bateria":
+          return { ...d, baterias: d.baterias.map((b) => (b.id === ref.id ? { ...b, lat: c.lat, lon: c.lon } : b)) };
+        default:
+          return d;
+      }
+    });
+  }
+  function addMapTranquera(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, tranqueras: [...d.tranqueras, { ...newTranquera(), lat: c.lat, lon: c.lon }] }));
+  }
+  function addMapBateria(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, baterias: [...d.baterias, { ...newBateria(), lat: c.lat, lon: c.lon }] }));
+  }
+  function deleteMapPoint(ref: PointRef) {
+    setDraft((d) => {
+      switch (ref.kind) {
+        case "tranq1":
+          return { ...d, tranq1Lat: undefined, tranq1Lon: undefined };
+        case "tranquera":
+          return { ...d, tranqueras: d.tranqueras.filter((t) => t.id !== ref.id) };
+        case "bateria":
+          return {
+            ...d,
+            baterias:
+              d.baterias.length > 1
+                ? d.baterias.filter((b) => b.id !== ref.id)
+                : d.baterias.map((b) => (b.id === ref.id ? { id: b.id } : b)),
+          };
+        default:
+          return d; // origen/destino: roles fijos, no se borran
+      }
+    });
+  }
 
   // ---- repeat-row helpers ----
   function patchBateria(id: string, patch: Partial<Bateria>) {
@@ -376,9 +410,10 @@ export default function HojaRutaForm() {
     try {
       const folio = draft.folio?.trim() || genFolio();
       if (!draft.folio) set("folio", folio);
+      const mapaPng = await renderMapaPng();
       const buildHojaRutaPdf = await loadPdf();
-      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
-      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob, mapaRutaUrl });
+      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl: mapaPng });
+      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob, mapaRutaUrl: mapaPng });
       if (!res.ok) {
         setError(res.error ?? "Error al enviar. Reintentá.");
         return;
@@ -415,8 +450,9 @@ export default function HojaRutaForm() {
     setPreviewing(true);
     try {
       const folio = draft.folio?.trim() || genFolio();
+      const mapaPng = await renderMapaPng();
       const buildHojaRutaPdf = await loadPdf();
-      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
+      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl: mapaPng });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -435,6 +471,7 @@ export default function HojaRutaForm() {
     setDraft(emptyDraft());
     setMedia({ ...EMPTY_MEDIA });
     setFotosPorTramo({});
+    setMapaView(null);
     setSuccess(null);
     setError(null);
   }
@@ -891,25 +928,31 @@ export default function HojaRutaForm() {
         />
       </section>
 
-      {/* MAPA DE RUTA (generado) */}
+      {/* MAPA DE RUTA (editor interactivo) */}
       <section className="card">
-        <h2>Mapa de ruta (generado)</h2>
+        <h2>Mapa de ruta (editable)</h2>
         <p className="hint">
-          Mapa virtual con origen, destino, tranqueras y baterías + la ruta. Se genera solo cuando hay
-          coordenadas; usa OpenStreetMap (o esquema si no hay conexión). Se adjunta al envío y al PDF.
+          Arrastrá los marcadores para reubicar origen, destino, tranqueras y baterías. Con los modos{" "}
+          <strong>＋ Tranquera</strong> / <strong>＋ Batería</strong> tocá el mapa para agregar puntos;
+          el popup de cada marcador permite quitarlo. El encuadre actual se adjunta al envío y al PDF
+          (OpenStreetMap; esquema si no hay conexión).
         </p>
         {!puedeMapa && (
           <p className="hint">
-            Cargá coordenadas de <strong>origen</strong> y <strong>destino</strong> (sección 3) para
-            generar el mapa.
+            Cargá coordenadas de <strong>origen</strong> y <strong>destino</strong> (sección 3, con 📍
+            o tipeando lat/lon) para trazar la ruta.
           </p>
         )}
-        {mapaRutaUrl && <img src={mapaRutaUrl} alt="Mapa de ruta" className="mapa-ruta-img" />}
-        <div className="actions" style={{ marginTop: 10 }}>
-          <button type="button" className="btn-ghost" onClick={generarMapa} disabled={!puedeMapa || mapaBusy}>
-            {mapaBusy ? "Generando mapa…" : mapaRutaUrl ? "Regenerar mapa" : "Generar mapa"}
-          </button>
-        </div>
+        <Suspense fallback={<div className="mapa-loading">Cargando mapa…</div>}>
+          <MapaEditor
+            points={editablePoints}
+            onMovePoint={moveMapPoint}
+            onAddTranquera={addMapTranquera}
+            onAddBateria={addMapBateria}
+            onDeletePoint={deleteMapPoint}
+            onViewChange={setMapaView}
+          />
+        </Suspense>
       </section>
 
       {/* TRAMOS */}
@@ -1423,21 +1466,53 @@ function CoordRow({
   onGps: () => void;
   busy: boolean;
 }) {
+  // Texto local: deja tipear libre (incl. "-", "-38.") sin que fmtCoord
+  // reformatee a 6 decimales en cada tecla. El número parseado fluye en vivo
+  // hacia arriba; cuando el campo no está enfocado, se re-sincroniza con el
+  // prop (GPS / autollenado de base).
+  const [latText, setLatText] = useState(() => fmtCoord(value.lat));
+  const [lonText, setLonText] = useState(() => fmtCoord(value.lon));
+  const latFocus = useRef(false);
+  const lonFocus = useRef(false);
+
+  useEffect(() => {
+    if (!latFocus.current) setLatText(fmtCoord(value.lat));
+  }, [value.lat]);
+  useEffect(() => {
+    if (!lonFocus.current) setLonText(fmtCoord(value.lon));
+  }, [value.lon]);
+
   return (
     <div className="coord-row">
       <input
         className="coord-in"
         inputMode="decimal"
-        value={fmtCoord(value.lat)}
+        value={latText}
         placeholder="Lat -38.957851"
-        onChange={(e) => onChange({ lat: parseCoord(e.target.value), lon: value.lon })}
+        onFocus={() => (latFocus.current = true)}
+        onBlur={() => {
+          latFocus.current = false;
+          setLatText(fmtCoord(value.lat));
+        }}
+        onChange={(e) => {
+          setLatText(e.target.value);
+          onChange({ lat: parseCoord(e.target.value), lon: value.lon });
+        }}
       />
       <input
         className="coord-in"
         inputMode="decimal"
-        value={fmtCoord(value.lon)}
+        value={lonText}
         placeholder="Lon -67.974515"
-        onChange={(e) => onChange({ lat: value.lat, lon: parseCoord(e.target.value) })}
+        onFocus={() => (lonFocus.current = true)}
+        onBlur={() => {
+          lonFocus.current = false;
+          setLonText(fmtCoord(value.lon));
+        }}
+        onChange={(e) => {
+          setLonText(e.target.value);
+          onChange({ lat: value.lat, lon: parseCoord(e.target.value) });
+        }}
       />
       <button type="button" className="btn-gps" onClick={onGps} disabled={busy} title="Usar mi ubicación">
         {busy ? "📍…" : "📍 GPS"}

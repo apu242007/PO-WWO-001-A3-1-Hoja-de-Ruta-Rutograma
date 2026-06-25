@@ -63,6 +63,50 @@ function loadImg(src: string, timeoutMs = 7000): Promise<HTMLImageElement> {
   });
 }
 
+/** Compone el fondo con tiles reales de OpenStreetMap (sin API key).
+ * tile.openstreetmap.org envía CORS `*`, así el canvas se exporta sin "taint".
+ * Devuelve true si dibujó al menos un tile. © OpenStreetMap contributors. */
+async function drawOsmTiles(
+  ctx: CanvasRenderingContext2D,
+  centerLat: number,
+  centerLon: number,
+  z: number,
+  w: number,
+  h: number
+): Promise<boolean> {
+  const n = Math.pow(2, z);
+  const cx = projX(centerLon, z);
+  const cy = projY(centerLat, z);
+  const originX = cx - w / 2; // world px en el borde izq. del canvas
+  const originY = cy - h / 2; // world px en el borde sup. del canvas
+  const minTX = Math.floor(originX / TILE);
+  const maxTX = Math.floor((originX + w) / TILE);
+  const minTY = Math.floor(originY / TILE);
+  const maxTY = Math.floor((originY + h) / TILE);
+
+  const jobs: Promise<boolean>[] = [];
+  for (let tx = minTX; tx <= maxTX; tx++) {
+    for (let ty = minTY; ty <= maxTY; ty++) {
+      if (ty < 0 || ty >= n) continue; // fuera de rango vertical → cielo
+      const wx = ((tx % n) + n) % n; // wrap longitudinal (antimeridiano)
+      const url = `https://tile.openstreetmap.org/${z}/${wx}/${ty}.png`;
+      const dx = tx * TILE - originX;
+      const dy = ty * TILE - originY;
+      jobs.push(
+        loadImg(url)
+          .then((img) => {
+            ctx.drawImage(img, dx, dy, TILE, TILE);
+            return true;
+          })
+          .catch(() => false)
+      );
+    }
+  }
+  if (jobs.length === 0) return false;
+  const results = await Promise.all(jobs);
+  return results.some(Boolean);
+}
+
 function schematicBg(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, "#eef4f8");
@@ -115,8 +159,19 @@ function tag(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, 
   ctx.fillText(t, x, y + 15);
 }
 
-/** Genera el mapa de ruta. Devuelve dataURL PNG o null si no hay puntos. */
-export async function buildRouteMapImage(points: MapPoint[]): Promise<string | null> {
+/** Encuadre opcional para que el PNG matchee la vista del editor Leaflet. */
+export interface MapView {
+  lat: number;
+  lon: number;
+  zoom: number;
+}
+
+/** Genera el mapa de ruta. Devuelve dataURL PNG o null si no hay puntos.
+ * Si `view` viene, usa ese center+zoom (encuadre del editor); si no, auto-fit. */
+export async function buildRouteMapImage(
+  points: MapPoint[],
+  view?: MapView
+): Promise<string | null> {
   const pts = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
   if (pts.length === 0) return null;
   if (typeof document === "undefined") return null;
@@ -143,17 +198,21 @@ export async function buildRouteMapImage(points: MapPoint[]): Promise<string | n
     minLon -= 0.02;
     maxLon += 0.02;
   }
-  const center = { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
-  const z = Math.max(2, Math.min(15, fitZoom(minLat, maxLat, minLon, maxLon, W, H)));
+  const center = view
+    ? { lat: view.lat, lon: view.lon }
+    : { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
+  const z = view
+    ? Math.max(2, Math.min(19, Math.round(view.zoom)))
+    : Math.max(2, Math.min(15, fitZoom(minLat, maxLat, minLon, maxLon, W, H)));
 
-  // Fondo: mapa real OSM (Wikimedia) o esquema
+  // Fondo: tiles reales de OpenStreetMap; si fallan red/CORS → esquema
   let tiled = false;
   try {
-    const url = `https://maps.wikimedia.org/img/osm-intl,${z},${center.lat.toFixed(5)},${center.lon.toFixed(5)},${W}x${H}.png`;
-    const img = await loadImg(url);
-    ctx.drawImage(img, 0, 0, W, H);
-    ctx.getImageData(0, 0, 1, 1); // lanza SecurityError si el canvas quedó "tainted"
-    tiled = true;
+    const ok = await drawOsmTiles(ctx, center.lat, center.lon, z, W, H);
+    if (ok) {
+      ctx.getImageData(0, 0, 1, 1); // lanza SecurityError si el canvas quedó "tainted"
+      tiled = true;
+    }
   } catch {
     tiled = false;
   }
@@ -225,7 +284,7 @@ export async function buildRouteMapImage(points: MapPoint[]): Promise<string | n
   ctx.fillText(`Ruta · ${dist.toFixed(1)} km (línea recta)`, 8, H - 11);
   ctx.font = "9px Arial";
   ctx.textAlign = "right";
-  ctx.fillText(tiled ? "© OpenStreetMap" : "esquema sin conexión", W - 8, H - 11);
+  ctx.fillText(tiled ? "© OpenStreetMap contributors" : "esquema sin conexión", W - 8, H - 11);
 
   try {
     return canvas.toDataURL("image/png");

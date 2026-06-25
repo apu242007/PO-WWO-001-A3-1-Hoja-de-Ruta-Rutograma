@@ -7,10 +7,24 @@ export function parseInt0(raw: string): number | undefined {
   return Number(clean);
 }
 
-/** parse decimal accepting "," or "." as separator → Number | undefined */
+/** parse decimal accepting "," or "." as separator → Number | undefined.
+ * es-AR: con coma presente → punto = miles, coma = decimal ("1.234,5").
+ * Sólo puntos → el último punto es el decimal, los previos son miles
+ * (así "4.40" = 4,4 y no 440). */
 export function parseDecimal(raw: string): number | undefined {
-  const clean = raw.replace(/[^\d.,]/g, "").replace(/\./g, "").replace(",", ".");
-  if (!clean) return undefined;
+  const clean0 = raw.replace(/[^\d.,]/g, "");
+  if (!clean0) return undefined;
+  let clean: string;
+  if (clean0.includes(",")) {
+    clean = clean0.replace(/\./g, "").replace(",", ".");
+  } else {
+    const last = clean0.lastIndexOf(".");
+    clean =
+      last >= 0
+        ? clean0.slice(0, last).replace(/\./g, "") + "." + clean0.slice(last + 1)
+        : clean0;
+  }
+  if (!clean || clean === ".") return undefined;
   const n = Number(clean);
   return Number.isFinite(n) ? n : undefined;
 }
