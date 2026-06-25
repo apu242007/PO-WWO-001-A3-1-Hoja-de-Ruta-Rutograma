@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   ALTURA_LIMITE_CARGA,
   CLIENTES,
@@ -39,11 +39,17 @@ import { loadPreparadorProfile, savePreparadorProfile } from "../lib/preparadorP
 import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
-import { buildRouteMapImage, type MapPoint } from "../lib/routeMap";
+import { buildRouteMapImage, type MapPoint, type MapView } from "../lib/routeMap";
+import { fetchRoadRoute, matchTraceToRoads, type LatLon } from "../lib/routing";
+import { useGpsTracker, postTrackPing, isTrackBackendConfigured } from "../lib/tracking";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
+import type { EditablePoint, PointRef } from "./MapaEditor";
 
 // Lazy-loaded: jsPDF + html2canvas + qrcode (~400 KB) only when a PDF is built.
 const loadPdf = () => import("../lib/pdfGenerator").then((m) => m.buildHojaRutaPdf);
+
+// Lazy-loaded: Leaflet (~42 KB gzip) + su CSS sólo cuando el mapa monta.
+const MapaEditor = lazy(() => import("./MapaEditor"));
 
 interface SuccessInfo {
   folio: string;
@@ -197,68 +203,181 @@ export default function HojaRutaForm() {
     }
   }
 
-  // ---- mapa de ruta (virtual) ----
-  const [mapaRutaUrl, setMapaRutaUrl] = useState<string | null>(null);
-  const [mapaBusy, setMapaBusy] = useState(false);
+  // ---- mapa de ruta (editor Leaflet) ----
+  const [mapaView, setMapaView] = useState<MapView | null>(null);
 
-  const routePoints = useMemo((): MapPoint[] => {
-    const pts: MapPoint[] = [];
+  // Puntos editables — orden de cadena: origen → 1ª tranquera → tranqueras →
+  // destino, luego baterías sueltas. Fuente única: draft. Lo leen el editor
+  // (interactivo) y el renderer (PNG del PDF/adjunto).
+  const editablePoints = useMemo<EditablePoint[]>(() => {
+    const pts: EditablePoint[] = [];
     if (hasCoord({ lat: draft.origenLat, lon: draft.origenLon }))
-      pts.push({ lat: draft.origenLat!, lon: draft.origenLon!, label: draft.origen || "Origen", kind: "origen" });
-    draft.baterias.forEach((b) => {
-      if (hasCoord({ lat: b.lat, lon: b.lon })) pts.push({ lat: b.lat!, lon: b.lon!, kind: "bateria" });
-    });
+      pts.push({ ref: { kind: "origen" }, lat: draft.origenLat!, lon: draft.origenLon!, kind: "origen", name: draft.origen || "Origen" });
     if (hasCoord({ lat: draft.tranq1Lat, lon: draft.tranq1Lon }))
-      pts.push({ lat: draft.tranq1Lat!, lon: draft.tranq1Lon!, kind: "gate" });
+      pts.push({ ref: { kind: "tranq1" }, lat: draft.tranq1Lat!, lon: draft.tranq1Lon!, kind: "gate", name: "1ª tranquera" });
     draft.tranqueras.forEach((t) => {
-      if (hasCoord({ lat: t.lat, lon: t.lon })) pts.push({ lat: t.lat!, lon: t.lon!, kind: "gate" });
+      if (hasCoord({ lat: t.lat, lon: t.lon }))
+        pts.push({ ref: { kind: "tranquera", id: t.id }, lat: t.lat!, lon: t.lon!, kind: "gate", name: "Tranquera" });
     });
     if (hasCoord({ lat: draft.destinoLat, lon: draft.destinoLon }))
-      pts.push({ lat: draft.destinoLat!, lon: draft.destinoLon!, label: draft.destino || "Destino", kind: "destino" });
+      pts.push({ ref: { kind: "destino" }, lat: draft.destinoLat!, lon: draft.destinoLon!, kind: "destino", name: draft.destino || "Destino" });
+    draft.baterias.forEach((b) => {
+      if (hasCoord({ lat: b.lat, lon: b.lon }))
+        pts.push({ ref: { kind: "bateria", id: b.id }, lat: b.lat!, lon: b.lon!, kind: "bateria", name: "Batería" });
+    });
     return pts;
   }, [
-    draft.origenLat,
-    draft.origenLon,
-    draft.destinoLat,
-    draft.destinoLon,
-    draft.tranq1Lat,
-    draft.tranq1Lon,
-    draft.origen,
-    draft.destino,
-    draft.baterias,
-    draft.tranqueras,
+    draft.origenLat, draft.origenLon, draft.destinoLat, draft.destinoLon,
+    draft.tranq1Lat, draft.tranq1Lon, draft.origen, draft.destino,
+    draft.baterias, draft.tranqueras,
   ]);
+
+  // MapPoint[] para el renderer del PNG (deriva de editablePoints, mismo orden)
+  const routePoints = useMemo<MapPoint[]>(
+    () => editablePoints.map((p) => ({ lat: p.lat, lon: p.lon, kind: p.kind, label: p.name })),
+    [editablePoints]
+  );
 
   const puedeMapa = routePoints.length >= 2;
 
-  async function generarMapa() {
-    if (!puedeMapa) return;
-    setMapaBusy(true);
-    setError(null);
+  // ---- ruteo vial: la ruta sigue calles (OSRM); fallback línea recta ----
+  const [routeGeometry, setRouteGeometry] = useState<LatLon[] | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+
+  // cadena de la ruta (origen → tranqueras → destino), sin baterías
+  const chainForRoute = useMemo(
+    () => editablePoints.filter((p) => p.kind !== "bateria").map((p) => ({ lat: p.lat, lon: p.lon })),
+    [editablePoints]
+  );
+  const chainSig = chainForRoute.map((c) => `${c.lat.toFixed(5)},${c.lon.toFixed(5)}`).join("|");
+  useEffect(() => {
+    if (chainForRoute.length < 2) {
+      setRouteGeometry(null);
+      setRouteLoading(false);
+      return;
+    }
+    let active = true;
+    setRouteLoading(true);
+    const t = setTimeout(async () => {
+      const r = await fetchRoadRoute(chainForRoute);
+      if (!active) return;
+      setRouteGeometry(r ? r.geometry : null);
+      setRouteLoading(false);
+    }, 600);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainSig]);
+
+  // ---- tracking GPS en vivo + map-matching (snap a calles) ----
+  const [tracedGeometry, setTracedGeometry] = useState<LatLon[] | null>(null);
+  const [snapping, setSnapping] = useState(false);
+  const tracker = useGpsTracker((p) => {
+    void postTrackPing(p, draft.unidadRecorrido ?? "", draft.folio ?? "");
+  });
+  const tracePoints = useMemo<LatLon[]>(
+    () => tracker.points.map((p) => [p.lat, p.lon] as LatLon),
+    [tracker.points]
+  );
+
+  async function detenerYSnappear() {
+    tracker.stop();
+    if (tracker.points.length < 2) return;
+    setSnapping(true);
     try {
-      const url = await buildRouteMapImage(routePoints);
-      setMapaRutaUrl(url);
-      if (!url) setError("No se pudo generar el mapa.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo generar el mapa.");
+      const r = await matchTraceToRoads(tracker.points.map((p) => ({ lat: p.lat, lon: p.lon })));
+      setTracedGeometry(r ? r.geometry : null);
+      if (!r) setError("No se pudo ajustar la traza a calles. Revisá la conexión e intentá de nuevo.");
     } finally {
-      setMapaBusy(false);
+      setSnapping(false);
+    }
+  }
+  function limpiarTraza() {
+    tracker.clear();
+    setTracedGeometry(null);
+  }
+
+  // Geometría efectiva del mapa: la traza GPS snappeada tiene prioridad sobre la
+  // ruta planificada por waypoints.
+  const effectiveGeometry = tracedGeometry ?? routeGeometry;
+
+  const routeBadge = tracedGeometry
+    ? "🛰️ traza GPS (calles)"
+    : tracker.tracking
+      ? "🛰️ grabando traza…"
+      : snapping
+        ? "ajustando traza a calles…"
+        : chainForRoute.length < 2
+          ? null
+          : routeLoading
+            ? "calculando ruta…"
+            : routeGeometry
+              ? "🛣️ ruta por calles"
+              : "📏 línea recta (sin ruteo)";
+
+  // Genera el PNG del mapa con el encuadre actual del editor. null si no hay puntos.
+  async function renderMapaPng(): Promise<string | null> {
+    if (routePoints.length < 1 && !effectiveGeometry) return null;
+    try {
+      return await buildRouteMapImage(routePoints, mapaView ?? undefined, effectiveGeometry);
+    } catch {
+      return null;
     }
   }
 
-  // auto-genera cuando hay origen+destino con coords (con debounce)
-  const routeSig = routePoints.map((p) => `${p.lat},${p.lon}`).join("|");
-  useEffect(() => {
-    if (routePoints.length < 2) {
-      setMapaRutaUrl(null);
-      return;
-    }
-    const t = setTimeout(() => {
-      buildRouteMapImage(routePoints).then((url) => url && setMapaRutaUrl(url)).catch(() => {});
-    }, 700);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSig]);
+  // ---- handlers del editor (bidireccional con el draft) ----
+  function moveMapPoint(ref: PointRef, c: { lat: number; lon: number }) {
+    setDraft((d) => {
+      switch (ref.kind) {
+        case "origen":
+          return { ...d, origenLat: c.lat, origenLon: c.lon };
+        case "destino":
+          return { ...d, destinoLat: c.lat, destinoLon: c.lon };
+        case "tranq1":
+          return { ...d, tranq1Lat: c.lat, tranq1Lon: c.lon };
+        case "tranquera":
+          return { ...d, tranqueras: d.tranqueras.map((t) => (t.id === ref.id ? { ...t, lat: c.lat, lon: c.lon } : t)) };
+        case "bateria":
+          return { ...d, baterias: d.baterias.map((b) => (b.id === ref.id ? { ...b, lat: c.lat, lon: c.lon } : b)) };
+        default:
+          return d;
+      }
+    });
+  }
+  function setMapOrigen(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, origenLat: c.lat, origenLon: c.lon }));
+  }
+  function setMapDestino(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, destinoLat: c.lat, destinoLon: c.lon }));
+  }
+  function addMapTranquera(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, tranqueras: [...d.tranqueras, { ...newTranquera(), lat: c.lat, lon: c.lon }] }));
+  }
+  function addMapBateria(c: { lat: number; lon: number }) {
+    setDraft((d) => ({ ...d, baterias: [...d.baterias, { ...newBateria(), lat: c.lat, lon: c.lon }] }));
+  }
+  function deleteMapPoint(ref: PointRef) {
+    setDraft((d) => {
+      switch (ref.kind) {
+        case "tranq1":
+          return { ...d, tranq1Lat: undefined, tranq1Lon: undefined };
+        case "tranquera":
+          return { ...d, tranqueras: d.tranqueras.filter((t) => t.id !== ref.id) };
+        case "bateria":
+          return {
+            ...d,
+            baterias:
+              d.baterias.length > 1
+                ? d.baterias.filter((b) => b.id !== ref.id)
+                : d.baterias.map((b) => (b.id === ref.id ? { id: b.id } : b)),
+          };
+        default:
+          return d; // origen/destino: roles fijos, no se borran
+      }
+    });
+  }
 
   // ---- repeat-row helpers ----
   function patchBateria(id: string, patch: Partial<Bateria>) {
@@ -376,9 +495,10 @@ export default function HojaRutaForm() {
     try {
       const folio = draft.folio?.trim() || genFolio();
       if (!draft.folio) set("folio", folio);
+      const mapaPng = await renderMapaPng();
       const buildHojaRutaPdf = await loadPdf();
-      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
-      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob, mapaRutaUrl });
+      const pdfBlob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl: mapaPng });
+      const res = await uploadHojaRuta({ draft: { ...draft, folio }, media, fotosPorTramo, pdfBlob, mapaRutaUrl: mapaPng });
       if (!res.ok) {
         setError(res.error ?? "Error al enviar. Reintentá.");
         return;
@@ -415,8 +535,9 @@ export default function HojaRutaForm() {
     setPreviewing(true);
     try {
       const folio = draft.folio?.trim() || genFolio();
+      const mapaPng = await renderMapaPng();
       const buildHojaRutaPdf = await loadPdf();
-      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl });
+      const blob = await buildHojaRutaPdf({ draft: { ...draft, folio }, media, fotosPorTramo, folio, mapaRutaUrl: mapaPng });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -435,6 +556,11 @@ export default function HojaRutaForm() {
     setDraft(emptyDraft());
     setMedia({ ...EMPTY_MEDIA });
     setFotosPorTramo({});
+    setMapaView(null);
+    setRouteGeometry(null);
+    tracker.stop();
+    tracker.clear();
+    setTracedGeometry(null);
     setSuccess(null);
     setError(null);
   }
@@ -891,24 +1017,77 @@ export default function HojaRutaForm() {
         />
       </section>
 
-      {/* MAPA DE RUTA (generado) */}
+      {/* MAPA DE RUTA (editor interactivo) */}
       <section className="card">
-        <h2>Mapa de ruta (generado)</h2>
+        <h2>Mapa de ruta (editable)</h2>
         <p className="hint">
-          Mapa virtual con origen, destino, tranqueras y baterías + la ruta. Se genera solo cuando hay
-          coordenadas; usa OpenStreetMap (o esquema si no hay conexión). Se adjunta al envío y al PDF.
+          Tocá <strong>＋ Origen</strong> / <strong>＋ Destino</strong> y marcá el punto en el mapa
+          (o reubicalos arrastrando). Con <strong>＋ Tranquera</strong> / <strong>＋ Batería</strong>{" "}
+          agregás más puntos; el popup de cada marcador permite quitarlo. El encuadre actual se adjunta
+          al envío y al PDF (OpenStreetMap; esquema si no hay conexión).
         </p>
         {!puedeMapa && (
           <p className="hint">
-            Cargá coordenadas de <strong>origen</strong> y <strong>destino</strong> (sección 3) para
-            generar el mapa.
+            Cargá coordenadas de <strong>origen</strong> y <strong>destino</strong> (sección 3, con 📍
+            o tipeando lat/lon) para trazar la ruta.
           </p>
         )}
-        {mapaRutaUrl && <img src={mapaRutaUrl} alt="Mapa de ruta" className="mapa-ruta-img" />}
-        <div className="actions" style={{ marginTop: 10 }}>
-          <button type="button" className="btn-ghost" onClick={generarMapa} disabled={!puedeMapa || mapaBusy}>
-            {mapaBusy ? "Generando mapa…" : mapaRutaUrl ? "Regenerar mapa" : "Generar mapa"}
-          </button>
+        <Suspense fallback={<div className="mapa-loading">Cargando mapa…</div>}>
+          <MapaEditor
+            points={editablePoints}
+            routeGeometry={effectiveGeometry}
+            trace={tracedGeometry ? null : tracePoints.length >= 2 ? tracePoints : null}
+            routeBadge={routeBadge}
+            onMovePoint={moveMapPoint}
+            onSetOrigen={setMapOrigen}
+            onSetDestino={setMapDestino}
+            onAddTranquera={addMapTranquera}
+            onAddBateria={addMapBateria}
+            onDeletePoint={deleteMapPoint}
+            onViewChange={setMapaView}
+          />
+        </Suspense>
+
+        {/* Tracking GPS en vivo → map-matching (snap a calles) */}
+        <div className="tracking-panel">
+          <div className="tracking-head">
+            <span>📡 Tracking GPS en vivo</span>
+            <span className="tracking-status">
+              {tracker.tracking
+                ? `grabando · ${tracker.points.length} pts`
+                : snapping
+                  ? "ajustando a calles…"
+                  : tracedGeometry
+                    ? `traza ajustada (${tracker.points.length} pts)`
+                    : tracker.points.length
+                      ? `${tracker.points.length} pts sin ajustar`
+                      : "detenido"}
+            </span>
+          </div>
+          <div className="actions" style={{ marginTop: 8 }}>
+            {!tracker.tracking ? (
+              <button type="button" className="btn-primary" onClick={() => tracker.start(10000)}>
+                ▶ Iniciar tracking
+              </button>
+            ) : (
+              <button type="button" className="btn-primary" onClick={detenerYSnappear}>
+                ■ Detener y ajustar a calles
+              </button>
+            )}
+            {!tracker.tracking && tracker.points.length > 0 && (
+              <button type="button" className="btn-ghost" onClick={limpiarTraza}>
+                Limpiar traza
+              </button>
+            )}
+          </div>
+          {tracker.error && <div className="error-box" style={{ marginTop: 8 }}>⚠️ {tracker.error}</div>}
+          <p className="hint" style={{ marginTop: 8 }}>
+            Captura la posición cada 10 s y la ajusta a calles reales (OSRM). La traza ajustada se usa
+            como ruta del rutograma (se adjunta al PDF/envío).{" "}
+            {isTrackBackendConfigured
+              ? "Cada punto se envía a /track."
+              : "Persistencia /track no configurada — los puntos no se envían al servidor."}
+          </p>
         </div>
       </section>
 
@@ -1423,21 +1602,53 @@ function CoordRow({
   onGps: () => void;
   busy: boolean;
 }) {
+  // Texto local: deja tipear libre (incl. "-", "-38.") sin que fmtCoord
+  // reformatee a 6 decimales en cada tecla. El número parseado fluye en vivo
+  // hacia arriba; cuando el campo no está enfocado, se re-sincroniza con el
+  // prop (GPS / autollenado de base).
+  const [latText, setLatText] = useState(() => fmtCoord(value.lat));
+  const [lonText, setLonText] = useState(() => fmtCoord(value.lon));
+  const latFocus = useRef(false);
+  const lonFocus = useRef(false);
+
+  useEffect(() => {
+    if (!latFocus.current) setLatText(fmtCoord(value.lat));
+  }, [value.lat]);
+  useEffect(() => {
+    if (!lonFocus.current) setLonText(fmtCoord(value.lon));
+  }, [value.lon]);
+
   return (
     <div className="coord-row">
       <input
         className="coord-in"
         inputMode="decimal"
-        value={fmtCoord(value.lat)}
+        value={latText}
         placeholder="Lat -38.957851"
-        onChange={(e) => onChange({ lat: parseCoord(e.target.value), lon: value.lon })}
+        onFocus={() => (latFocus.current = true)}
+        onBlur={() => {
+          latFocus.current = false;
+          setLatText(fmtCoord(value.lat));
+        }}
+        onChange={(e) => {
+          setLatText(e.target.value);
+          onChange({ lat: parseCoord(e.target.value), lon: value.lon });
+        }}
       />
       <input
         className="coord-in"
         inputMode="decimal"
-        value={fmtCoord(value.lon)}
+        value={lonText}
         placeholder="Lon -67.974515"
-        onChange={(e) => onChange({ lat: value.lat, lon: parseCoord(e.target.value) })}
+        onFocus={() => (lonFocus.current = true)}
+        onBlur={() => {
+          lonFocus.current = false;
+          setLonText(fmtCoord(value.lon));
+        }}
+        onChange={(e) => {
+          setLonText(e.target.value);
+          onChange({ lat: value.lat, lon: parseCoord(e.target.value) });
+        }}
       />
       <button type="button" className="btn-gps" onClick={onGps} disabled={busy} title="Usar mi ubicación">
         {busy ? "📍…" : "📍 GPS"}
