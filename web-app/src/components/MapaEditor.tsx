@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import type { LatLon } from "../lib/routing";
 
 export type PointRef =
   | { kind: "origen" }
@@ -28,6 +29,10 @@ export interface EditablePoint {
 
 export interface MapaEditorProps {
   points: EditablePoint[];
+  /** Geometría vial (sigue calles). Si falta → ruta línea recta entre puntos. */
+  routeGeometry?: LatLon[] | null;
+  /** Texto de estado de la ruta para la barra (ej. "ruta por calles"). */
+  routeBadge?: string | null;
   onMovePoint: (ref: PointRef, c: { lat: number; lon: number }) => void;
   /** Fija (o reubica) origen tocando el mapa. */
   onSetOrigen: (c: { lat: number; lon: number }) => void;
@@ -75,6 +80,8 @@ function refKey(ref: PointRef): string {
 
 export default function MapaEditor({
   points,
+  routeGeometry,
+  routeBadge,
   onMovePoint,
   onSetOrigen,
   onSetDestino,
@@ -172,20 +179,27 @@ export default function MapaEditor({
     map.getContainer().style.cursor = modo === "mover" ? "" : "crosshair";
   }, [modo]);
 
-  // ---- reconcilia marcadores + ruta cuando cambian los puntos ----
+  // ---- reconcilia marcadores + ruta cuando cambian los puntos o la geometría ----
   const pointsSig = points.map((p) => `${refKey(p.ref)}@${p.lat.toFixed(6)},${p.lon.toFixed(6)}`).join("|");
+  const geomSig = routeGeometry
+    ? `${routeGeometry.length}:${routeGeometry[0]?.join(",")}:${routeGeometry[routeGeometry.length - 1]?.join(",")}`
+    : "";
   useEffect(() => {
     const map = mapRef.current;
     const layer = layerRef.current;
     if (!map || !layer) return;
     layer.clearLayers();
 
-    // Ruta = cadena sin baterías (origen → tranqueras → destino)
+    // Ruta: geometría vial (sigue calles) si viene; si no, línea recta entre
+    // los puntos de la cadena (origen → tranqueras → destino, sin baterías).
     const chain = points.filter((p) => p.kind !== "bateria");
-    if (chain.length >= 2) {
-      const latlngs = chain.map((p) => [p.lat, p.lon] as [number, number]);
-      L.polyline(latlngs, { color: "#ffffff", weight: 8, opacity: 0.9 }).addTo(layer);
-      L.polyline(latlngs, { color: "#0b3d5c", weight: 4 }).addTo(layer);
+    const routeLatLngs: [number, number][] =
+      routeGeometry && routeGeometry.length >= 2
+        ? routeGeometry.map((g) => [g[0], g[1]])
+        : chain.map((p) => [p.lat, p.lon]);
+    if (routeLatLngs.length >= 2) {
+      L.polyline(routeLatLngs, { color: "#ffffff", weight: 8, opacity: 0.9 }).addTo(layer);
+      L.polyline(routeLatLngs, { color: "#0b3d5c", weight: 4 }).addTo(layer);
     }
 
     // Marcadores
@@ -244,7 +258,7 @@ export default function MapaEditor({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointsSig]);
+  }, [pointsSig, geomSig]);
 
   return (
     <div className="mapa-editor">
@@ -287,6 +301,7 @@ export default function MapaEditor({
         {modo !== "mover" && (
           <span className="mapa-mode-hint">Tocá el mapa para ubicar el punto</span>
         )}
+        {modo === "mover" && routeBadge && <span className="mapa-route-badge">{routeBadge}</span>}
       </div>
       <div ref={containerRef} className="mapa-canvas" />
     </div>

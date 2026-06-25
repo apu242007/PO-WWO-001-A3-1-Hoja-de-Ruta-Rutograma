@@ -40,6 +40,7 @@ import { compressImage } from "../lib/imageUtils";
 import { parseDecimal, parseInt0, formatDecimal, formatInt, formatDominio, isValidDominio } from "../lib/format";
 import { BASES, findBase, getGps, kmEntre, hasCoord, parseCoord, fmtCoord, type Coord } from "../lib/geo";
 import { buildRouteMapImage, type MapPoint, type MapView } from "../lib/routeMap";
+import { fetchRoadRoute, type LatLon } from "../lib/routing";
 import { genFolio, isDemoMode, uploadHojaRuta } from "../services/uploadHojaRuta";
 import type { EditablePoint, PointRef } from "./MapaEditor";
 
@@ -238,11 +239,51 @@ export default function HojaRutaForm() {
 
   const puedeMapa = routePoints.length >= 2;
 
+  // ---- ruteo vial: la ruta sigue calles (OSRM); fallback línea recta ----
+  const [routeGeometry, setRouteGeometry] = useState<LatLon[] | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+
+  // cadena de la ruta (origen → tranqueras → destino), sin baterías
+  const chainForRoute = useMemo(
+    () => editablePoints.filter((p) => p.kind !== "bateria").map((p) => ({ lat: p.lat, lon: p.lon })),
+    [editablePoints]
+  );
+  const chainSig = chainForRoute.map((c) => `${c.lat.toFixed(5)},${c.lon.toFixed(5)}`).join("|");
+  useEffect(() => {
+    if (chainForRoute.length < 2) {
+      setRouteGeometry(null);
+      setRouteLoading(false);
+      return;
+    }
+    let active = true;
+    setRouteLoading(true);
+    const t = setTimeout(async () => {
+      const r = await fetchRoadRoute(chainForRoute);
+      if (!active) return;
+      setRouteGeometry(r ? r.geometry : null);
+      setRouteLoading(false);
+    }, 600);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainSig]);
+
+  const routeBadge =
+    chainForRoute.length < 2
+      ? null
+      : routeLoading
+        ? "calculando ruta…"
+        : routeGeometry
+          ? "🛣️ ruta por calles"
+          : "📏 línea recta (sin ruteo)";
+
   // Genera el PNG del mapa con el encuadre actual del editor. null si no hay puntos.
   async function renderMapaPng(): Promise<string | null> {
     if (routePoints.length < 1) return null;
     try {
-      return await buildRouteMapImage(routePoints, mapaView ?? undefined);
+      return await buildRouteMapImage(routePoints, mapaView ?? undefined, routeGeometry);
     } catch {
       return null;
     }
@@ -478,6 +519,7 @@ export default function HojaRutaForm() {
     setMedia({ ...EMPTY_MEDIA });
     setFotosPorTramo({});
     setMapaView(null);
+    setRouteGeometry(null);
     setSuccess(null);
     setError(null);
   }
@@ -952,6 +994,8 @@ export default function HojaRutaForm() {
         <Suspense fallback={<div className="mapa-loading">Cargando mapa…</div>}>
           <MapaEditor
             points={editablePoints}
+            routeGeometry={routeGeometry}
+            routeBadge={routeBadge}
             onMovePoint={moveMapPoint}
             onSetOrigen={setMapOrigen}
             onSetDestino={setMapDestino}

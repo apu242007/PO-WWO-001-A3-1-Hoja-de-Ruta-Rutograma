@@ -4,6 +4,7 @@
 // esquema con grilla. Devuelve un dataURL PNG (para preview, PDF y adjunto).
 
 import { haversineKm } from "./geo";
+import { routeLengthKm, type LatLon } from "./routing";
 
 export type MapPointKind = "origen" | "gate" | "bateria" | "destino";
 
@@ -170,7 +171,8 @@ export interface MapView {
  * Si `view` viene, usa ese center+zoom (encuadre del editor); si no, auto-fit. */
 export async function buildRouteMapImage(
   points: MapPoint[],
-  view?: MapView
+  view?: MapView,
+  routeGeometry?: LatLon[] | null
 ): Promise<string | null> {
   const pts = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
   if (pts.length === 0) return null;
@@ -228,8 +230,15 @@ export async function buildRouteMapImage(
     y: H / 2 + (projY(p.lat, z) - cy),
   });
 
-  // Polilínea de ruta (excluye baterías; van como marcadores sueltos)
-  const routePts = pts.filter((p) => p.kind !== "bateria").map(toPx);
+  // Polilínea de ruta: geometría vial (sigue calles) si viene; si no, cadena
+  // recta entre puntos (excluye baterías; van como marcadores sueltos).
+  const hasRoad = !!routeGeometry && routeGeometry.length >= 2;
+  const routePts = hasRoad
+    ? routeGeometry!.map((g) => ({
+        x: W / 2 + (projX(g[1], z) - cx),
+        y: H / 2 + (projY(g[0], z) - cy),
+      }))
+    : pts.filter((p) => p.kind !== "bateria").map(toPx);
   if (routePts.length >= 2) {
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -267,11 +276,16 @@ export async function buildRouteMapImage(
     }
   }
 
-  // Distancia total (línea recta de la cadena de ruta)
-  const chain = pts.filter((p) => p.kind !== "bateria");
-  let dist = 0;
-  for (let i = 0; i < chain.length - 1; i++) {
-    dist += haversineKm(chain[i].lat, chain[i].lon, chain[i + 1].lat, chain[i + 1].lon);
+  // Distancia total: por calles si hay geometría vial; si no, línea recta.
+  let dist: number;
+  if (hasRoad) {
+    dist = routeLengthKm(routeGeometry!);
+  } else {
+    const chain = pts.filter((p) => p.kind !== "bateria");
+    dist = 0;
+    for (let i = 0; i < chain.length - 1; i++) {
+      dist += haversineKm(chain[i].lat, chain[i].lon, chain[i + 1].lat, chain[i + 1].lon);
+    }
   }
 
   // Pie: título + distancia + atribución
@@ -281,7 +295,7 @@ export async function buildRouteMapImage(
   ctx.font = "bold 11px Arial";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(`Ruta · ${dist.toFixed(1)} km (línea recta)`, 8, H - 11);
+  ctx.fillText(`Ruta · ${dist.toFixed(1)} km (${hasRoad ? "por calles" : "línea recta"})`, 8, H - 11);
   ctx.font = "9px Arial";
   ctx.textAlign = "right";
   ctx.fillText(tiled ? "© OpenStreetMap contributors" : "esquema sin conexión", W - 8, H - 11);

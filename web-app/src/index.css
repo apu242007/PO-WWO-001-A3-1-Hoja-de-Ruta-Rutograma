@@ -245,6 +245,12 @@ body {
   color: var(--navy-2);
   font-weight: 600;
 }
+.mapa-route-badge {
+  font-size: 0.82rem;
+  color: var(--navy);
+  font-weight: 700;
+  margin-left: auto;
+}
 .mapa-canvas {
   width: 100%;
   height: 400px;
