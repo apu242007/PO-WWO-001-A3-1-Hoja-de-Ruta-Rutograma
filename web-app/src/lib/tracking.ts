@@ -97,8 +97,20 @@ export function useGpsTracker(onPing?: (p: GpsPing) => void): GpsTracker {
         onPingRef.current?.(ping);
       },
       (e) => {
-        const msg =
-          e.code === 1 ? "Permiso denegado" : e.code === 2 ? "Posición no disponible" : "Tiempo agotado";
+        if (e.code === 1) {
+          // permiso denegado: no se recupera sin acción del usuario → detener el
+          // watch (si no, queda "grabando" sin capturar nada).
+          if (watchId.current != null && "geolocation" in navigator) {
+            navigator.geolocation.clearWatch(watchId.current);
+          }
+          watchId.current = null;
+          setTracking(false);
+          setError(
+            "GPS: permiso denegado. Habilitá la ubicación en el navegador (ícono junto a la URL → Ubicación → Permitir) y, en Windows, Configuración → Privacidad → Ubicación activada. Después tocá Iniciar de nuevo."
+          );
+          return;
+        }
+        const msg = e.code === 2 ? "Posición no disponible" : "Tiempo agotado";
         setError(`GPS: ${msg}`);
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
